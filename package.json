@@ -1,0 +1,47 @@
+{
+  "name": "offline-photo-metadata-manager",
+  "version": "0.1.0",
+  "description": "A local-first desktop app for non-destructive photo metadata sidecar editing and Immich staging exports.",
+  "main": "out/main/index.js",
+  "type": "module",
+  "author": "Codex",
+  "license": "MIT",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=20.18"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite dev",
+    "build": "tsc --noEmit && electron-vite build",
+    "preview": "electron-vite preview",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit",
+    "verify": "tsc --noEmit && vitest run --root . && electron-vite build",
+    "setup:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1",
+    "launch:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/launch.ps1",
+    "verify:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1"
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.1",
+    "exiftool-vendored": "^31.0.0",
+    "lucide-react": "^0.468.0",
+    "maplibre-gl": "^4.7.1",
+    "pmtiles": "^3.2.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sql.js": "^1.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/sql.js": "^1.4.9",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.1",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  }
+}
