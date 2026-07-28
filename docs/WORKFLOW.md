@@ -4,8 +4,8 @@
 
 1. Launch the app with `Launch.cmd`.
 2. Choose one or more photo source folders.
-3. Choose a sidecar mirror folder.
-4. Optionally import a `.pmtiles` offline map pack.
+3. Keep the default sidecar mirror or choose another mirror folder.
+4. Import a `.pmtiles` offline map pack from `MapSetup.cmd`.
 5. Scan each source folder.
 
 ## Source Folders
@@ -52,4 +52,3 @@ Use Revert to remove the mirror sidecar for selected photos. The UI then falls b
 Use Export Selected or Export All to choose a staging folder. The app creates media files plus sidecars next to them in the layout Immich expects.
 
 The export tries to hardlink media first. If hardlinking fails, it copies the media file.
-

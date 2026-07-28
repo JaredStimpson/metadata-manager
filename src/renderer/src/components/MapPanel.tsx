@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import { Protocol } from 'pmtiles';
-import { Crosshair, MapPin, Navigation, Search } from 'lucide-react';
+import { AlertTriangle, Crosshair, MapPin, Navigation, Search } from 'lucide-react';
 import { LocalPlace, MapPack, PhotoAsset } from '../../../shared/types';
 
 let protocolRegistered = false;
@@ -27,6 +27,9 @@ export function MapPanel({
   const [pin, setPin] = useState(() => initialPin(selectedAsset));
   const [placeQuery, setPlaceQuery] = useState('');
   const [places, setPlaces] = useState<LocalPlace[]>([]);
+  const [manualLatitude, setManualLatitude] = useState('');
+  const [manualLongitude, setManualLongitude] = useState('');
+  const [mapError, setMapError] = useState<string>();
 
   const activeMapPack = useMemo(
     () => mapPacks.find((pack) => pack.id === activeMapPackId && pack.kind === 'pmtiles'),
@@ -42,7 +45,10 @@ export function MapPanel({
   }, []);
 
   useEffect(() => {
-    setPin(initialPin(selectedAsset));
+    const next = initialPin(selectedAsset);
+    setPin(next);
+    setManualLatitude(next?.latitude.toString() ?? '');
+    setManualLongitude(next?.longitude.toString() ?? '');
   }, [selectedAsset?.id]);
 
   useEffect(() => {
@@ -50,15 +56,22 @@ export function MapPanel({
 
     mapRef.current?.remove();
     markerRef.current = null;
+    setMapError(undefined);
+    const initialCenter = pin
+      ? [pin.longitude, pin.latitude]
+      : activeMapPack.metadata?.center
+        ? [activeMapPack.metadata.center.longitude, activeMapPack.metadata.center.latitude]
+        : [-98.5795, 39.8283];
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: buildStyle(`${tileServerUrl}/pmtiles/${encodeURIComponent(activeMapPack.id)}`),
-      center: pin ? [pin.longitude, pin.latitude] : [-98.5795, 39.8283],
-      zoom: pin ? 10 : 3,
+      center: initialCenter as [number, number],
+      zoom: pin ? 10 : activeMapPack.metadata?.center?.zoom ?? 3,
       attributionControl: false
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     map.on('click', (event) => setPin({ latitude: event.lngLat.lat, longitude: event.lngLat.lng }));
+    map.on('error', (event) => setMapError(event.error?.message ?? 'Map failed to load.'));
     mapRef.current = map;
 
     return () => {
@@ -95,6 +108,8 @@ export function MapPanel({
     mapRef.current?.flyTo({ center: [longitude, latitude], zoom: 12 });
   }
 
+  const manualPin = parseManualPin(manualLatitude, manualLongitude);
+
   if (!activeMapPack || !tileServerUrl) {
     return (
       <div className="map-empty">
@@ -102,15 +117,15 @@ export function MapPanel({
         <div className="coordinate-entry">
           <input
             placeholder="Latitude"
-            value={pin?.latitude ?? ''}
-            onChange={(event) => setPin({ latitude: Number(event.target.value), longitude: pin?.longitude ?? 0 })}
+            value={manualLatitude}
+            onChange={(event) => setManualLatitude(event.target.value)}
           />
           <input
             placeholder="Longitude"
-            value={pin?.longitude ?? ''}
-            onChange={(event) => setPin({ latitude: pin?.latitude ?? 0, longitude: Number(event.target.value) })}
+            value={manualLongitude}
+            onChange={(event) => setManualLongitude(event.target.value)}
           />
-          <button disabled={!pin} onClick={() => pin && onApplyLocation(pin.latitude, pin.longitude)}>
+          <button disabled={!manualPin} onClick={() => manualPin && onApplyLocation(manualPin.latitude, manualPin.longitude)}>
             Apply
           </button>
         </div>
@@ -135,6 +150,12 @@ export function MapPanel({
           ))}
         </div>
       )}
+      {mapError && (
+        <div className="map-error">
+          <AlertTriangle size={15} />
+          <span>{mapError}</span>
+        </div>
+      )}
       <div ref={containerRef} className="map-canvas" />
       <div className="map-footer">
         <span>
@@ -152,6 +173,14 @@ export function MapPanel({
 function initialPin(asset?: PhotoAsset): { latitude: number; longitude: number } | undefined {
   if (asset?.effective.latitude === undefined || asset.effective.longitude === undefined) return undefined;
   return { latitude: asset.effective.latitude, longitude: asset.effective.longitude };
+}
+
+function parseManualPin(latitude: string, longitude: string): { latitude: number; longitude: number } | undefined {
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return undefined;
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return undefined;
+  return { latitude: lat, longitude: lon };
 }
 
 function buildStyle(pmtilesUrl: string): maplibregl.StyleSpecification {
@@ -212,4 +241,3 @@ function buildStyle(pmtilesUrl: string): maplibregl.StyleSpecification {
     ]
   };
 }
-

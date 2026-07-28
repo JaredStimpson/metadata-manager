@@ -1,5 +1,6 @@
 param(
-  [switch]$SkipVerify
+  [switch]$SkipVerify,
+  [switch]$StarterMap
 )
 
 . "$PSScriptRoot\common.ps1"
@@ -21,6 +22,11 @@ if (-not $SkipVerify) {
   Invoke-LocalBin vitest run --root .
 }
 
+if ($StarterMap) {
+  Write-Host ''
+  Write-Host 'Creating a starter offline map...'
+  & "$PSScriptRoot\maps.ps1" -Mode Starter
+}
+
 Write-Host ''
 Write-Host 'Setup complete. Run Launch.cmd to start the app.'
-

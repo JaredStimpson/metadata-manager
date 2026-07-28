@@ -82,6 +82,7 @@ label {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   padding: 0 18px;
   border-bottom: 1px solid #d7d0c3;
   background: #fffdf7;
@@ -114,6 +115,8 @@ h2 {
 .top-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .sidebar {
@@ -137,6 +140,24 @@ h2 {
 .panel h2 {
   margin: 0 0 10px;
   font-size: 14px;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.panel-heading h2 {
+  margin: 0;
+}
+
+.panel-heading button {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .setup-panel {
@@ -396,6 +417,17 @@ h2 {
   gap: 10px;
 }
 
+.map-pack-summary {
+  min-height: 30px;
+  border: 1px solid #d7d0c3;
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: #59584f;
+  background: #f8f6ef;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .map-panel {
   display: grid;
   grid-template-rows: auto auto 330px auto;
@@ -448,6 +480,19 @@ h2 {
   min-height: 44px;
 }
 
+.map-error {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  color: #8a1528;
+  background: #fff0f2;
+  border: 1px solid #efb8c0;
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-size: 12px;
+}
+
 .place-results small {
   color: #747266;
 }
@@ -466,4 +511,3 @@ h2 {
   color: #59584f;
   font-size: 12px;
 }
-

@@ -35,6 +35,15 @@ interface AssetRow {
   updated_at: string;
 }
 
+interface MapPackRow {
+  id: string;
+  name: string;
+  path: string;
+  kind: 'pmtiles' | 'places-sqlite';
+  importedAt: string;
+  metadata_json?: string;
+}
+
 export class DatabaseService {
   private SQL?: SqlJsStatic;
   private db?: Database;
@@ -103,18 +112,31 @@ export class DatabaseService {
   }
 
   listMapPacks(): MapPack[] {
-    return this.select<MapPack>('SELECT * FROM map_packs ORDER BY importedAt DESC');
+    return this.select<MapPackRow>('SELECT * FROM map_packs ORDER BY importedAt DESC').map(mapMapPack);
   }
 
   getMapPack(id: string): MapPack | undefined {
-    return this.selectOne<MapPack>('SELECT * FROM map_packs WHERE id = ?', [id]);
+    const row = this.selectOne<MapPackRow>('SELECT * FROM map_packs WHERE id = ?', [id]);
+    return row ? mapMapPack(row) : undefined;
+  }
+
+  getMapPackByPath(filePath: string): MapPack | undefined {
+    const row = this.selectOne<MapPackRow>('SELECT * FROM map_packs WHERE path = ?', [filePath]);
+    return row ? mapMapPack(row) : undefined;
   }
 
   async addMapPack(mapPack: MapPack): Promise<void> {
     this.run(
-      `INSERT OR REPLACE INTO map_packs (id, name, path, kind, importedAt)
-       VALUES (?, ?, ?, ?, ?)`,
-      [mapPack.id, mapPack.name, mapPack.path, mapPack.kind, mapPack.importedAt]
+      `INSERT OR REPLACE INTO map_packs (id, name, path, kind, importedAt, metadata_json)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        mapPack.id,
+        mapPack.name,
+        mapPack.path,
+        mapPack.kind,
+        mapPack.importedAt,
+        mapPack.metadata ? JSON.stringify(mapPack.metadata) : undefined
+      ]
     );
     await this.save();
   }
@@ -266,7 +288,8 @@ export class DatabaseService {
         name TEXT NOT NULL,
         path TEXT NOT NULL UNIQUE,
         kind TEXT NOT NULL,
-        importedAt TEXT NOT NULL
+        importedAt TEXT NOT NULL,
+        metadata_json TEXT
       );
 
       CREATE TABLE IF NOT EXISTS assets (
@@ -311,6 +334,14 @@ export class DatabaseService {
         created_at TEXT NOT NULL
       );
     `);
+
+    this.ensureColumn('map_packs', 'metadata_json', 'TEXT');
+  }
+
+  private ensureColumn(table: string, column: string, declaration: string): void {
+    const existing = this.select<{ name: string }>(`PRAGMA table_info(${table})`);
+    if (existing.some((row) => row.name === column)) return;
+    this.requireDb().exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);
   }
 
   private run(sql: string, values: unknown[] = []): void {
@@ -379,10 +410,30 @@ function mapAsset(row: AssetRow): PhotoAsset {
   };
 }
 
+function mapMapPack(row: MapPackRow): MapPack {
+  return {
+    id: row.id,
+    name: row.name,
+    path: row.path,
+    kind: row.kind,
+    importedAt: row.importedAt,
+    metadata: row.metadata_json ? parseMapPackMetadata(row.metadata_json) : undefined
+  };
+}
+
 function parseMetadata(value: string): MetadataFields {
   try {
     return metadataFromUnknown(JSON.parse(value));
   } catch {
     return emptyMetadata();
+  }
+}
+
+function parseMapPackMetadata(value: string): MapPack['metadata'] {
+  try {
+    const parsed = JSON.parse(value) as MapPack['metadata'];
+    return parsed && typeof parsed === 'object' ? parsed : undefined;
+  } catch {
+    return undefined;
   }
 }

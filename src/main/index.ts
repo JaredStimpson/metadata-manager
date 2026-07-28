@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { DatabaseService } from './db/database';
 import { ExifToolService } from './metadata/exiftool';
 import { LibraryService } from './services/library-service';
@@ -20,6 +20,11 @@ async function bootstrap(): Promise<void> {
 
   database = new DatabaseService(app.getPath('userData'));
   await database.init();
+  if (!database.getSettings().sidecarRoot) {
+    await database.updateSettings({
+      sidecarRoot: path.join(app.getPath('documents'), 'Photo Metadata Manager', 'Sidecars')
+    });
+  }
   exiftool = new ExifToolService();
   library = new LibraryService(database, exiftool);
   tileServer = new TileServer(database);
@@ -105,6 +110,13 @@ function registerIpc(): void {
     library.exportImmich(assetIds, destination)
   );
   ipcMain.handle('path:reveal', (_event, filePath: string) => library.revealPath(filePath));
+  ipcMain.handle('external:open', async (_event, url: string) => {
+    const parsed = new URL(url);
+    if (!['https:', 'http:'].includes(parsed.protocol)) {
+      throw new Error('Only http and https links can be opened.');
+    }
+    await shell.openExternal(parsed.toString());
+  });
 }
 
 app.on('window-all-closed', () => {

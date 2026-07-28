@@ -28,6 +28,14 @@ scripts/
 docs/
 ```
 
+## Stability Notes
+
+- Renderer code does not read or write the filesystem directly.
+- Main-process IPC validates imported map packs before storing them.
+- The default sidecar mirror is outside photo source folders.
+- External links are restricted to `http` and `https` protocols.
+- Original media files are never modified by metadata saves.
+
 ## Main Process
 
 The Electron main process owns:
@@ -72,4 +80,3 @@ Focused unit tests cover:
 ## Release Notes
 
 This repository currently builds unpackaged Electron bundles into `out/`. A future packaging step can add `electron-builder` or a similar packager once installer/update preferences are clear.
-

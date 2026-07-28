@@ -34,6 +34,21 @@ export interface MapPack {
   path: string;
   kind: 'pmtiles' | 'places-sqlite';
   importedAt: string;
+  metadata?: MapPackMetadata;
+}
+
+export interface MapPackMetadata {
+  sizeBytes?: number;
+  minZoom?: number;
+  maxZoom?: number;
+  bounds?: [number, number, number, number];
+  center?: {
+    latitude: number;
+    longitude: number;
+    zoom?: number;
+  };
+  tileType?: 'mvt' | 'png' | 'jpeg' | 'webp' | 'avif' | 'unknown';
+  placesCount?: number;
 }
 
 export interface AppSettings {
@@ -126,9 +141,9 @@ export interface PhotoMetadataApi {
   searchPlaces(query: string): Promise<LocalPlace[]>;
   exportImmich(assetIds: string[] | 'all', destination: string): Promise<ExportResult>;
   revealPath(path: string): Promise<void>;
+  openExternal(url: string): Promise<void>;
 }
 
 export const emptyMetadata = (): MetadataFields => ({
   tags: []
 });
-

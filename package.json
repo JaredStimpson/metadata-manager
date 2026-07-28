@@ -20,7 +20,9 @@
     "verify": "tsc --noEmit && vitest run --root . && electron-vite build",
     "setup:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1",
     "launch:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/launch.ps1",
-    "verify:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1"
+    "verify:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1",
+    "maps:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/maps.ps1",
+    "doctor:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor.ps1"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",

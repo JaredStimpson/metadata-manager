@@ -1,9 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import initSqlJs from 'sql.js';
+import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import { shell } from 'electron';
 import { DatabaseService } from '../db/database';
 import { ExifToolService } from '../metadata/exiftool';
+import { inspectPmtiles } from '../metadata/map-pack';
 import { hasMetadata, mergeMetadata, normalizeMetadata } from '../metadata/merge';
 import {
   fallbackAdjacentSidecarPath,
@@ -19,6 +20,7 @@ import {
   ExportResult,
   LocalPlace,
   MapPack,
+  MapPackMetadata,
   MetadataFields,
   MetadataPatch,
   PhotoAsset,
@@ -34,6 +36,15 @@ export class LibraryService {
   ) {}
 
   async updateSettings(settings: Partial<AppSettings>): Promise<AppSettings> {
+    if (settings.sidecarRoot) {
+      const resolved = path.resolve(settings.sidecarRoot);
+      for (const sourceRoot of this.db.listSourceRoots()) {
+        if (isSameOrChildPath(sourceRoot.path, resolved)) {
+          throw new Error('Choose a sidecar mirror folder outside of your photo source folders.');
+        }
+      }
+      settings.sidecarRoot = resolved;
+    }
     return this.db.updateSettings(settings);
   }
 
@@ -172,12 +183,19 @@ export class LibraryService {
     const kind = extension === '.pmtiles' ? 'pmtiles' : extension === '.sqlite' || extension === '.db' ? 'places-sqlite' : undefined;
     if (!kind) throw new Error('Map packs must be .pmtiles, .sqlite, or .db files.');
 
+    const existing = this.db.getMapPackByPath(resolved);
+    const metadata = kind === 'pmtiles' ? await inspectPmtiles(resolved) : await this.inspectPlacesPack(resolved);
+    if (kind === 'pmtiles' && metadata.tileType !== 'mvt') {
+      throw new Error('The map panel supports vector PMTiles basemaps. Choose a vector .pmtiles file.');
+    }
+
     const mapPack: MapPack = {
-      id: crypto.randomUUID(),
+      id: existing?.id ?? crypto.randomUUID(),
       name: path.basename(resolved),
       path: resolved,
       kind,
-      importedAt: new Date().toISOString()
+      importedAt: existing?.importedAt ?? new Date().toISOString(),
+      metadata
     };
 
     await this.db.addMapPack(mapPack);
@@ -205,11 +223,13 @@ export class LibraryService {
       if (results.length >= 20) break;
       try {
         const db = new SQL.Database(await fs.readFile(pack.path));
+        const columns = getTableColumns(db, 'places');
+        const orderBy = columns.includes('population') ? 'population DESC NULLS LAST, name ASC' : 'name ASC';
         const statement = db.prepare(
           `SELECT rowid AS id, name, region, country, latitude, longitude
            FROM places
            WHERE name LIKE ?
-           ORDER BY population DESC NULLS LAST, name ASC
+           ORDER BY ${orderBy}
            LIMIT ?`,
           [`%${text}%`, 20 - results.length]
         );
@@ -238,6 +258,25 @@ export class LibraryService {
     }
 
     return results;
+  }
+
+  private async inspectPlacesPack(filePath: string): Promise<MapPackMetadata> {
+    const SQL = await initSqlJs({
+      locateFile: (file) => path.join(process.cwd(), 'node_modules/sql.js/dist', file)
+    });
+    const db = new SQL.Database(await fs.readFile(filePath));
+    try {
+      const columns = getTableColumns(db, 'places');
+      for (const required of ['name', 'latitude', 'longitude']) {
+        if (!columns.includes(required)) {
+          throw new Error(`Place packs need a places table with ${required}.`);
+        }
+      }
+      const result = db.exec('SELECT COUNT(*) AS count FROM places')[0]?.values[0]?.[0];
+      return { placesCount: Number(result) || 0 };
+    } finally {
+      db.close();
+    }
   }
 
   async exportImmich(assetIds: string[] | 'all', destination: string): Promise<ExportResult> {
@@ -350,6 +389,10 @@ export class LibraryService {
       updatedAt: new Date().toISOString()
     };
   }
+}
+
+function getTableColumns(db: SqlJsDatabase, table: string): string[] {
+  return db.exec(`PRAGMA table_info(${table})`)[0]?.values.map((row) => String(row[1])) ?? [];
 }
 
 async function* walkFiles(directory: string): AsyncGenerator<string> {

@@ -16,8 +16,8 @@ const api: PhotoMetadataApi = {
   listMapPacks: () => ipcRenderer.invoke('maps:list'),
   searchPlaces: (query: string) => ipcRenderer.invoke('places:search', query),
   exportImmich: (assetIds: string[] | 'all', destination: string) => ipcRenderer.invoke('export:immich', assetIds, destination),
-  revealPath: (path: string) => ipcRenderer.invoke('path:reveal', path)
+  revealPath: (path: string) => ipcRenderer.invoke('path:reveal', path),
+  openExternal: (url: string) => ipcRenderer.invoke('external:open', url)
 };
 
 contextBridge.exposeInMainWorld('photoMeta', api);
-

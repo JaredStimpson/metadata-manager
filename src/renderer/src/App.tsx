@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Archive,
   CheckCircle2,
+  ExternalLink,
   FolderOpen,
   Image,
   LocateFixed,
@@ -48,13 +49,17 @@ export function App(): JSX.Element {
 
   const selectedAssets = useMemo(() => assets.filter((asset) => selectedIds.includes(asset.id)), [assets, selectedIds]);
   const selectedAsset = selectedAssets[0];
+  const activeMapPack = useMemo(
+    () => mapPacks.find((pack) => pack.id === settings.activeMapPackId),
+    [mapPacks, settings.activeMapPackId]
+  );
 
   useEffect(() => {
     void loadInitial();
   }, []);
 
   useEffect(() => {
-    void refreshAssets(query);
+    void runTask('Refresh photos', () => refreshAssets(query));
   }, [query.sourceRootId, query.filter, query.text]);
 
   useEffect(() => {
@@ -73,17 +78,14 @@ export function App(): JSX.Element {
   }, [selectedAsset?.id, selectedAssets.length]);
 
   async function loadInitial(): Promise<void> {
-    setBusy(true);
-    try {
+    await runTask('Startup', async () => {
       const state: InitialState = await window.photoMeta.getInitialState();
       setSettings(state.settings);
       setSourceRoots(state.sourceRoots);
       setMapPacks(state.mapPacks);
       setTileServerUrl(state.tileServerUrl);
       await refreshAssets(defaultQuery);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function refreshAssets(nextQuery = query): Promise<void> {
@@ -95,62 +97,88 @@ export function App(): JSX.Element {
   async function chooseSources(): Promise<void> {
     const paths = await window.photoMeta.choosePhotoFolders();
     if (paths.length === 0) return;
-    setBusy(true);
-    try {
+    await runTask('Add sources', async () => {
       const roots = await window.photoMeta.addSourceRoots(paths);
       const state = await window.photoMeta.getInitialState();
       setSourceRoots(state.sourceRoots);
       setNotice(`Added ${roots.length} source folder${roots.length === 1 ? '' : 's'}`);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function chooseSidecarRoot(): Promise<void> {
     const path = await window.photoMeta.chooseDirectory('Choose Sidecar Mirror Folder');
     if (!path) return;
-    const next = await window.photoMeta.updateSettings({ sidecarRoot: path });
-    setSettings(next);
-    setNotice('Sidecar mirror folder set');
+    await runTask('Set sidecar mirror', async () => {
+      const next = await window.photoMeta.updateSettings({ sidecarRoot: path });
+      setSettings(next);
+      setNotice('Sidecar mirror folder set');
+    });
   }
 
   async function scan(root: SourceRoot): Promise<void> {
-    setBusy(true);
-    try {
+    await runTask('Scan folder', async () => {
       const result = await window.photoMeta.scanSourceRoot(root.id);
       const state = await window.photoMeta.getInitialState();
       setSourceRoots(state.sourceRoots);
       await refreshAssets(query);
       setNotice(`Scanned ${result.scanned} photos, ${result.errors.length} errors`);
-    } finally {
-      setBusy(false);
-    }
+    });
+  }
+
+  async function scanAll(): Promise<void> {
+    if (sourceRoots.length === 0) return;
+    await runTask('Scan folders', async () => {
+      let scanned = 0;
+      let errors = 0;
+      for (const root of sourceRoots) {
+        const result = await window.photoMeta.scanSourceRoot(root.id);
+        scanned += result.scanned;
+        errors += result.errors.length;
+      }
+      const state = await window.photoMeta.getInitialState();
+      setSourceRoots(state.sourceRoots);
+      await refreshAssets(query);
+      setNotice(`Scanned ${scanned} photos, ${errors} errors`);
+    });
   }
 
   async function importMapPack(): Promise<void> {
     const path = await window.photoMeta.chooseMapPack();
     if (!path) return;
-    const pack = await window.photoMeta.importMapPack(path);
-    const state = await window.photoMeta.getInitialState();
-    setSettings(state.settings);
-    setMapPacks(state.mapPacks);
-    setNotice(`Imported ${pack.name}`);
+    await runTask('Import map pack', async () => {
+      const pack = await window.photoMeta.importMapPack(path);
+      const state = await window.photoMeta.getInitialState();
+      setSettings(state.settings);
+      setMapPacks(state.mapPacks);
+      setNotice(`Imported ${pack.name}${pack.metadata?.maxZoom !== undefined ? `, z${pack.metadata.minZoom}-${pack.metadata.maxZoom}` : ''}`);
+    });
   }
 
   async function setActiveMapPack(id: string): Promise<void> {
-    const next = await window.photoMeta.updateSettings({ activeMapPackId: id || undefined });
-    setSettings(next);
+    await runTask('Set active map', async () => {
+      const next = await window.photoMeta.updateSettings({ activeMapPackId: id || undefined });
+      setSettings(next);
+    });
+  }
+
+  async function openMapGuide(): Promise<void> {
+    await runTask('Open map guide', () => window.photoMeta.openExternal('https://docs.protomaps.com/basemaps/downloads'));
   }
 
   async function saveForm(extraPatch: MetadataPatch = {}): Promise<void> {
     if (selectedIds.length === 0) return;
     const single = selectedAssets.length === 1;
     const patch: MetadataPatch = { ...extraPatch };
-    if (single || form.description.trim()) patch.description = form.description.trim() || null;
-    if (single || form.rating.trim()) patch.rating = form.rating.trim() === '' ? null : Number(form.rating);
-    if (single || form.dateTimeOriginal.trim()) patch.dateTimeOriginal = form.dateTimeOriginal.trim() || null;
-    if (single || form.latitude.trim()) patch.latitude = form.latitude.trim() === '' ? null : Number(form.latitude);
-    if (single || form.longitude.trim()) patch.longitude = form.longitude.trim() === '' ? null : Number(form.longitude);
+    try {
+      if (single || form.description.trim()) patch.description = form.description.trim() || null;
+      if (single || form.rating.trim()) patch.rating = parseNumberInput(form.rating, 0, 5, 'Rating', single);
+      if (single || form.dateTimeOriginal.trim()) patch.dateTimeOriginal = form.dateTimeOriginal.trim() || null;
+      if (single || form.latitude.trim()) patch.latitude = parseNumberInput(form.latitude, -90, 90, 'Latitude', single);
+      if (single || form.longitude.trim()) patch.longitude = parseNumberInput(form.longitude, -180, 180, 'Longitude', single);
+    } catch (error) {
+      setNotice(errorMessage(error));
+      return;
+    }
     if (single || form.tags.trim()) {
       patch.tags = form.tags
         .split(',')
@@ -158,50 +186,49 @@ export function App(): JSX.Element {
         .filter(Boolean);
     }
 
-    setBusy(true);
-    try {
+    await runTask('Save metadata', async () => {
       const result = await window.photoMeta.saveMetadata(selectedIds, patch);
       await refreshAssets(query);
       setNotice(`Saved ${result.sidecarsWritten} sidecar${result.sidecarsWritten === 1 ? '' : 's'}`);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function applyLocation(latitude: number, longitude: number): Promise<void> {
     setForm((current) => ({ ...current, latitude: latitude.toFixed(7), longitude: longitude.toFixed(7) }));
     if (selectedIds.length === 0) return;
-    setBusy(true);
-    try {
+    await runTask('Apply location', async () => {
       await window.photoMeta.saveMetadata(selectedIds, { latitude, longitude });
       await refreshAssets(query);
       setNotice(`Applied location to ${selectedIds.length} photo${selectedIds.length === 1 ? '' : 's'}`);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function revert(): Promise<void> {
     if (selectedIds.length === 0) return;
-    setBusy(true);
-    try {
+    await runTask('Revert sidecars', async () => {
       await window.photoMeta.revertSidecars(selectedIds);
       await refreshAssets(query);
       setNotice(`Reverted ${selectedIds.length} mirror sidecar${selectedIds.length === 1 ? '' : 's'}`);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function exportImmich(all: boolean): Promise<void> {
     const destination = await window.photoMeta.chooseDirectory('Choose Immich Staging Folder');
     if (!destination) return;
-    setBusy(true);
-    try {
+    await runTask('Export for Immich', async () => {
       const result = await window.photoMeta.exportImmich(all ? 'all' : selectedIds, destination);
       setNotice(
         `Exported ${result.exportedAssets} assets, ${result.sidecarsWritten} sidecars, ${result.errors.length} errors`
       );
+    });
+  }
+
+  async function runTask(label: string, task: () => Promise<void>): Promise<void> {
+    setBusy(true);
+    try {
+      await task();
+    } catch (error) {
+      setNotice(`${label} failed: ${errorMessage(error)}`);
     } finally {
       setBusy(false);
     }
@@ -234,6 +261,9 @@ export function App(): JSX.Element {
           <button onClick={importMapPack}>
             <Map size={17} /> Map Pack
           </button>
+          <button onClick={openMapGuide}>
+            <ExternalLink size={17} /> Get Maps
+          </button>
           <button disabled={selectedIds.length === 0} onClick={() => exportImmich(false)}>
             <Archive size={17} /> Export Selected
           </button>
@@ -261,7 +291,12 @@ export function App(): JSX.Element {
         </section>
 
         <section className="panel">
-          <h2>Folders</h2>
+          <div className="panel-heading">
+            <h2>Folders</h2>
+            <button disabled={sourceRoots.length === 0} onClick={scanAll}>
+              <RefreshCw size={15} /> Scan All
+            </button>
+          </div>
           <div className="source-list">
             {sourceRoots.map((root) => (
               <button
@@ -415,6 +450,15 @@ export function App(): JSX.Element {
                   </option>
                 ))}
             </select>
+            {activeMapPack && <div className="map-pack-summary">{mapPackSummary(activeMapPack)}</div>}
+            <div className="button-row">
+              <button onClick={importMapPack}>
+                <Map size={16} /> Import
+              </button>
+              <button onClick={openMapGuide}>
+                <ExternalLink size={16} /> Get Maps
+              </button>
+            </div>
             <MapPanel
               activeMapPackId={settings.activeMapPackId}
               mapPacks={mapPacks}
@@ -427,6 +471,22 @@ export function App(): JSX.Element {
       </main>
     </div>
   );
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  return 'Unexpected error';
+}
+
+function parseNumberInput(value: string, min: number, max: number, label: string, clearWhenBlank: boolean): number | null | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return clearWhenBlank ? null : undefined;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    throw new Error(`${label} must be between ${min} and ${max}.`);
+  }
+  return parsed;
 }
 
 function filterLabel(filter: NonNullable<AssetQuery['filter']>): string {
@@ -450,6 +510,20 @@ function badgeLabel(status: PhotoAsset['sidecarStatus']): string {
 function compactPath(value: string): string {
   if (value.length <= 34) return value;
   return `${value.slice(0, 16)}...${value.slice(-15)}`;
+}
+
+function mapPackSummary(pack: MapPack): string {
+  const parts = [pack.kind === 'pmtiles' ? 'PMTiles' : 'Places'];
+  if (pack.metadata?.tileType) parts.push(pack.metadata.tileType.toUpperCase());
+  if (pack.metadata?.minZoom !== undefined && pack.metadata?.maxZoom !== undefined) {
+    parts.push(`z${pack.metadata.minZoom}-${pack.metadata.maxZoom}`);
+  }
+  if (pack.metadata?.bounds) {
+    const [minLon, minLat, maxLon, maxLat] = pack.metadata.bounds;
+    parts.push(`${minLat.toFixed(2)}, ${minLon.toFixed(2)} to ${maxLat.toFixed(2)}, ${maxLon.toFixed(2)}`);
+  }
+  if (pack.metadata?.placesCount !== undefined) parts.push(`${pack.metadata.placesCount} places`);
+  return parts.join(' / ');
 }
 
 function canPreview(extension: string): boolean {

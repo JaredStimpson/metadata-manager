@@ -9,11 +9,12 @@ The app scans selected photo folders, reads embedded metadata and existing sidec
 From a fresh clone:
 
 ```powershell
-.\Setup.cmd
-.\Launch.cmd
+.\Install.cmd
+.\MapSetup.cmd
+.\Run.cmd
 ```
 
-If PowerShell blocks scripts, run the same commands from a normal terminal. The `.cmd` wrappers already use `-ExecutionPolicy Bypass` for this repository's scripts.
+The `.cmd` files are the beginner path. They call the PowerShell scripts with the right execution policy and do not require knowing Node, pnpm, Electron, or PMTiles.
 
 ## What It Does
 
@@ -51,6 +52,12 @@ ImmichStage/
 ## Useful Commands
 
 ```powershell
+.\Install.cmd
+.\Run.cmd
+.\MapSetup.cmd
+.\Doctor.cmd
+
+# Older aliases also work:
 .\Setup.cmd
 .\Launch.cmd
 .\Verify.cmd
@@ -58,6 +65,16 @@ ImmichStage/
 ```
 
 Equivalent PowerShell scripts live in `scripts/`.
+
+## Getting Offline Maps
+
+Run:
+
+```powershell
+.\MapSetup.cmd
+```
+
+Choose the starter map for a small world overview, or choose a custom area if you know the bounding box for the place you care about. After it creates a `.pmtiles` file, open the app, click Map Pack, and select that file.
 
 ## Requirements
 
@@ -74,4 +91,3 @@ Inside the Codex workspace, the setup scripts automatically use the bundled Node
 - [Metadata and Immich Compatibility](docs/METADATA_AND_IMMICH.md)
 - [Offline Maps](docs/OFFLINE_MAPS.md)
 - [Development](docs/DEVELOPMENT.md)
-

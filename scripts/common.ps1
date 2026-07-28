@@ -126,3 +126,63 @@ function Assert-LastExitCode {
   }
 }
 
+function Get-DefaultMapsDir {
+  $documents = [Environment]::GetFolderPath('MyDocuments')
+  if (-not $documents) {
+    $documents = Join-Path $env:USERPROFILE 'Documents'
+  }
+  return Join-Path $documents 'Photo Metadata Manager\Maps'
+}
+
+function Get-ToolsDir {
+  $repoRoot = Get-RepoRoot
+  $toolsDir = Join-Path $repoRoot '.tools'
+  New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+  return $toolsDir
+}
+
+function Get-PmtilesCli {
+  $toolsDir = Get-ToolsDir
+  $pmtilesExe = Join-Path $toolsDir 'pmtiles.exe'
+  if (Test-Path $pmtilesExe) {
+    return (Resolve-Path $pmtilesExe).Path
+  }
+
+  Write-Host ''
+  Write-Host 'Downloading PMTiles CLI...'
+  $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/protomaps/go-pmtiles/releases/latest' -Headers @{ 'User-Agent' = 'metadata-manager-setup' }
+  $asset = $release.assets |
+    Where-Object { $_.name -match 'windows' -and $_.name -match '(amd64|x86_64|x64)' -and $_.name -match '\.zip$' } |
+    Select-Object -First 1
+
+  if (-not $asset) {
+    Start-Process 'https://github.com/protomaps/go-pmtiles/releases'
+    throw 'Could not find a Windows PMTiles CLI asset automatically. Download pmtiles.exe from the releases page and place it in .tools.'
+  }
+
+  $zipPath = Join-Path $toolsDir $asset.name
+  Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -Headers @{ 'User-Agent' = 'metadata-manager-setup' }
+  Expand-Archive -Path $zipPath -DestinationPath $toolsDir -Force
+  $found = Get-ChildItem -LiteralPath $toolsDir -Recurse -Filter pmtiles.exe -File | Select-Object -First 1
+  if (-not $found) {
+    throw 'Downloaded PMTiles CLI archive did not contain pmtiles.exe.'
+  }
+  Copy-Item -LiteralPath $found.FullName -Destination $pmtilesExe -Force
+  return (Resolve-Path $pmtilesExe).Path
+}
+
+function Get-LatestProtomapsBuildUrl {
+  Write-Host ''
+  Write-Host 'Finding latest Protomaps basemap build...'
+  $page = Invoke-WebRequest -Uri 'https://maps.protomaps.com/builds' -Headers @{ 'User-Agent' = 'metadata-manager-setup' }
+  $matches = [regex]::Matches($page.Content, 'https://build\.protomaps\.com/(\d{8})\.pmtiles|(\d{8})\.pmtiles')
+  $dates = foreach ($match in $matches) {
+    if ($match.Groups[1].Value) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+  }
+  $latest = $dates | Sort-Object -Descending | Select-Object -First 1
+  if (-not $latest) {
+    Start-Process 'https://maps.protomaps.com/builds'
+    throw 'Could not discover the latest Protomaps build. Opened the builds page so you can copy a PMTiles URL manually.'
+  }
+  return "https://build.protomaps.com/$latest.pmtiles"
+}
