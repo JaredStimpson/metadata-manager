@@ -11,6 +11,7 @@ interface MapPanelProps {
   mapPacks: MapPack[];
   tileServerUrl?: string;
   selectedAsset?: PhotoAsset;
+  onSearchPlaces(query: string): Promise<LocalPlace[]>;
   onApplyLocation(latitude: number, longitude: number): Promise<void>;
 }
 
@@ -19,6 +20,7 @@ export function MapPanel({
   mapPacks,
   tileServerUrl,
   selectedAsset,
+  onSearchPlaces,
   onApplyLocation
 }: MapPanelProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -99,7 +101,7 @@ export function MapPanel({
   }, [pin]);
 
   async function searchPlaces(): Promise<void> {
-    const results = await window.photoMeta.searchPlaces(placeQuery);
+    const results = await onSearchPlaces(placeQuery);
     setPlaces(results);
   }
 

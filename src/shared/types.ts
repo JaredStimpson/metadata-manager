@@ -56,6 +56,10 @@ export interface AppSettings {
   activeMapPackId?: string;
 }
 
+export type AssetSortBy = 'filename' | 'date' | 'rating' | 'location' | 'edited' | 'fileType' | 'updated';
+
+export type SortDirection = 'asc' | 'desc';
+
 export interface PhotoAsset {
   id: string;
   sourceRootId: string;
@@ -85,6 +89,15 @@ export interface InitialState {
   tileServerUrl?: string;
 }
 
+export interface HealthStatus {
+  appVersion: string;
+  userDataPath: string;
+  sidecarRoot?: string;
+  tileServerRunning: boolean;
+  tileServerUrl?: string;
+  capabilities: string[];
+}
+
 export interface ScanResult {
   sourceRoot: SourceRoot;
   scanned: number;
@@ -96,8 +109,21 @@ export interface ScanResult {
 export interface AssetQuery {
   text?: string;
   sourceRootId?: string;
-  filter?: 'all' | 'missing-location' | 'edited' | 'conflicts';
+  filter?: 'all' | 'missing-location' | 'has-location' | 'edited' | 'conflicts';
+  sortBy?: AssetSortBy;
+  sortDirection?: SortDirection;
+  rating?: number;
+  tag?: string;
+  extension?: string;
   limit?: number;
+}
+
+export interface ImportFilesResult {
+  sourceRoots: SourceRoot[];
+  assets: PhotoAsset[];
+  imported: number;
+  skipped: number;
+  errors: Array<{ path: string; message: string }>;
 }
 
 export interface ExportResult {
@@ -126,12 +152,15 @@ export interface LocalPlace {
 }
 
 export interface PhotoMetadataApi {
+  healthCheck(): Promise<HealthStatus>;
   getInitialState(): Promise<InitialState>;
   choosePhotoFolders(): Promise<string[]>;
+  choosePhotoFiles(): Promise<string[]>;
   chooseDirectory(title?: string): Promise<string | undefined>;
   chooseMapPack(): Promise<string | undefined>;
   updateSettings(settings: Partial<AppSettings>): Promise<AppSettings>;
   addSourceRoots(paths: string[]): Promise<SourceRoot[]>;
+  addImportedFiles(paths: string[]): Promise<ImportFilesResult>;
   scanSourceRoot(sourceRootId: string): Promise<ScanResult>;
   listAssets(query?: AssetQuery): Promise<PhotoAsset[]>;
   saveMetadata(assetIds: string[], patch: MetadataPatch): Promise<SaveMetadataResult>;
@@ -142,7 +171,31 @@ export interface PhotoMetadataApi {
   exportImmich(assetIds: string[] | 'all', destination: string): Promise<ExportResult>;
   revealPath(path: string): Promise<void>;
   openExternal(url: string): Promise<void>;
+  openMapSetup(): Promise<void>;
 }
+
+export const photoMetadataCapabilities = [
+  'healthCheck',
+  'getInitialState',
+  'choosePhotoFolders',
+  'choosePhotoFiles',
+  'chooseDirectory',
+  'chooseMapPack',
+  'updateSettings',
+  'addSourceRoots',
+  'addImportedFiles',
+  'scanSourceRoot',
+  'listAssets',
+  'saveMetadata',
+  'revertSidecars',
+  'importMapPack',
+  'listMapPacks',
+  'searchPlaces',
+  'exportImmich',
+  'revealPath',
+  'openExternal',
+  'openMapSetup'
+] as const;
 
 export const emptyMetadata = (): MetadataFields => ({
   tags: []

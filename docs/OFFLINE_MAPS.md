@@ -21,9 +21,9 @@ When the script finishes, launch the app and import the generated `.pmtiles` fil
 ## Importing a Map Pack
 
 1. Launch the app.
-2. Use Map Pack in the top toolbar.
-3. Choose a `.pmtiles` file.
-4. Select it in the Geotag panel.
+2. Open Tools with the rail button.
+3. Use Import Pack and choose a `.pmtiles` file.
+4. Select it as the active map pack.
 
 The app runs a localhost-only tile server so MapLibre can request byte ranges from the local file. The renderer never receives broad filesystem access.
 
@@ -52,7 +52,7 @@ The app searches by `name` and sorts by `population` when present.
 
 ## Manual Coordinates
 
-If no map pack or place pack is installed, the metadata inspector still supports direct latitude and longitude entry.
+If no map pack or place pack is installed, the metadata inspector still supports direct latitude and longitude entry plus pasted `lat, lon` text.
 
 ## Where the Map Data Comes From
 

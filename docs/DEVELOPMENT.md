@@ -31,6 +31,8 @@ docs/
 ## Stability Notes
 
 - Renderer code does not read or write the filesystem directly.
+- Renderer code calls Electron only through `src/renderer/src/apiClient.ts`; buttons do not call `window.photoMeta` directly.
+- `health:check` reports app version, user data path, sidecar root, tile server state, and IPC capabilities for startup diagnostics.
 - Main-process IPC validates imported map packs before storing them.
 - The default sidecar mirror is outside photo source folders.
 - External links are restricted to `http` and `https` protocols.
@@ -48,6 +50,8 @@ The Electron main process owns:
 - Immich staging export.
 
 The renderer talks to the main process through typed IPC exposed by the preload script.
+
+The preload bridge is exposed from `src/preload/index.ts`. `Doctor.cmd` checks both the preload source and built preload output so missing bridge bundles are visible.
 
 ## Renderer
 
@@ -70,6 +74,10 @@ Run:
 
 Focused unit tests cover:
 
+- Desktop bridge capability shape.
+- Library query filters and sorting.
+- Batch metadata patch generation.
+- PMTiles rejection behavior.
 - XMP generation.
 - GPS conversion.
 - XMP parsing.

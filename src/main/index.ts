@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
@@ -5,7 +6,7 @@ import { DatabaseService } from './db/database';
 import { ExifToolService } from './metadata/exiftool';
 import { LibraryService } from './services/library-service';
 import { TileServer } from './services/tile-server';
-import { AppSettings, AssetQuery, MetadataPatch } from '../shared/types';
+import { AppSettings, AssetQuery, MetadataPatch, photoMetadataCapabilities } from '../shared/types';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -49,7 +50,7 @@ function createWindow(): void {
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.mjs'),
       contextIsolation: true,
-      sandbox: true,
+      sandbox: false,
       nodeIntegration: false
     }
   });
@@ -62,6 +63,18 @@ function createWindow(): void {
 }
 
 function registerIpc(): void {
+  ipcMain.handle('health:check', async () => {
+    const tileServerUrl = await tileServer.start();
+    return {
+      appVersion: app.getVersion(),
+      userDataPath: app.getPath('userData'),
+      sidecarRoot: database.getSettings().sidecarRoot,
+      tileServerRunning: Boolean(tileServerUrl),
+      tileServerUrl,
+      capabilities: [...photoMetadataCapabilities]
+    };
+  });
+
   ipcMain.handle('app:getInitialState', async () => ({
     settings: database.getSettings(),
     sourceRoots: database.listSourceRoots(),
@@ -73,6 +86,44 @@ function registerIpc(): void {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: 'Choose Photo Folders',
       properties: ['openDirectory', 'multiSelections', 'createDirectory']
+    });
+    return result.canceled ? [] : result.filePaths;
+  });
+
+  ipcMain.handle('dialog:choosePhotoFiles', async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Choose Photos',
+      filters: [
+        {
+          name: 'Photo files',
+          extensions: [
+            'avif',
+            'bmp',
+            'gif',
+            'heic',
+            'heif',
+            'jpg',
+            'jpeg',
+            'jxl',
+            'png',
+            'raw',
+            'rw2',
+            'svg',
+            'tif',
+            'tiff',
+            'webp',
+            'dng',
+            'cr2',
+            'cr3',
+            'nef',
+            'arw',
+            'raf',
+            'orf'
+          ]
+        },
+        { name: 'All files', extensions: ['*'] }
+      ],
+      properties: ['openFile', 'multiSelections']
     });
     return result.canceled ? [] : result.filePaths;
   });
@@ -99,6 +150,7 @@ function registerIpc(): void {
 
   ipcMain.handle('settings:update', (_event, settings: Partial<AppSettings>) => library.updateSettings(settings));
   ipcMain.handle('library:addSourceRoots', (_event, paths: string[]) => library.addSourceRoots(paths));
+  ipcMain.handle('library:addImportedFiles', (_event, paths: string[]) => library.addImportedFiles(paths));
   ipcMain.handle('library:scan', (_event, sourceRootId: string) => library.scanSourceRoot(sourceRootId));
   ipcMain.handle('assets:list', (_event, query?: AssetQuery) => library.listAssets(query));
   ipcMain.handle('metadata:save', (_event, assetIds: string[], patch: MetadataPatch) => library.saveMetadata(assetIds, patch));
@@ -117,6 +169,20 @@ function registerIpc(): void {
     }
     await shell.openExternal(parsed.toString());
   });
+  ipcMain.handle('tools:openMapSetup', async () => {
+    const scriptPath = findProjectFile('MapSetup.cmd');
+    const result = await shell.openPath(scriptPath);
+    if (result) throw new Error(result);
+  });
+}
+
+function findProjectFile(fileName: string): string {
+  const candidates = [process.cwd(), app.getAppPath(), path.dirname(process.execPath)];
+  for (const candidate of candidates) {
+    const filePath = path.join(candidate, fileName);
+    if (fs.existsSync(filePath)) return filePath;
+  }
+  return path.join(process.cwd(), fileName);
 }
 
 app.on('window-all-closed', () => {

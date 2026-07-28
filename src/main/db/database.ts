@@ -3,11 +3,13 @@ import path from 'node:path';
 import initSqlJs, { Database, SqlJsStatic, SqlValue } from 'sql.js';
 import {
   AppSettings,
+  AssetSortBy,
   MapPack,
   MetadataFields,
   MetadataSource,
   PhotoAsset,
   SidecarStatus,
+  SortDirection,
   SourceRoot,
   emptyMetadata
 } from '../../shared/types';
@@ -214,7 +216,12 @@ export class DatabaseService {
   listAssets(options: {
     text?: string;
     sourceRootId?: string;
-    filter?: 'all' | 'missing-location' | 'edited' | 'conflicts';
+    filter?: 'all' | 'missing-location' | 'has-location' | 'edited' | 'conflicts';
+    sortBy?: AssetSortBy;
+    sortDirection?: SortDirection;
+    rating?: number;
+    tag?: string;
+    extension?: string;
     limit?: number;
   } = {}): PhotoAsset[] {
     const where: string[] = [];
@@ -231,14 +238,30 @@ export class DatabaseService {
     if (options.filter === 'missing-location') {
       where.push("(json_extract(effective_json, '$.latitude') IS NULL OR json_extract(effective_json, '$.longitude') IS NULL)");
     }
+    if (options.filter === 'has-location') {
+      where.push("(json_extract(effective_json, '$.latitude') IS NOT NULL AND json_extract(effective_json, '$.longitude') IS NOT NULL)");
+    }
     if (options.filter === 'edited') {
       where.push("sidecar_status = 'mirror'");
     }
     if (options.filter === 'conflicts') {
       where.push("sidecar_status = 'conflict'");
     }
+    if (options.rating !== undefined) {
+      where.push("json_extract(effective_json, '$.rating') = ?");
+      values.push(options.rating);
+    }
+    if (options.tag) {
+      where.push("effective_json LIKE ?");
+      values.push(`%"${escapeLike(options.tag)}"%`);
+    }
+    if (options.extension) {
+      where.push('extension = ?');
+      values.push(options.extension.toLowerCase());
+    }
 
-    const sql = `SELECT * FROM assets ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY relative_path ASC LIMIT ?`;
+    const orderBy = orderByForAssets(options.sortBy, options.sortDirection);
+    const sql = `SELECT * FROM assets ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY ${orderBy} LIMIT ?`;
     values.push(options.limit ?? 500);
     return this.select<AssetRow>(sql, values).map(mapAsset);
   }
@@ -384,6 +407,32 @@ function toSqlValues(values: unknown[]): SqlValue[] {
     if (value instanceof Uint8Array) return value;
     return String(value);
   });
+}
+
+function orderByForAssets(sortBy: AssetSortBy = 'filename', direction: SortDirection = 'asc'): string {
+  const dir = direction === 'desc' ? 'DESC' : 'ASC';
+  const nulls = direction === 'desc' ? 'NULLS LAST' : 'NULLS FIRST';
+  switch (sortBy) {
+    case 'date':
+      return `json_extract(effective_json, '$.dateTimeOriginal') ${dir} ${nulls}, filename ASC`;
+    case 'rating':
+      return `json_extract(effective_json, '$.rating') ${dir} ${nulls}, filename ASC`;
+    case 'location':
+      return `json_extract(effective_json, '$.latitude') ${dir} ${nulls}, filename ASC`;
+    case 'edited':
+      return `sidecar_status ${dir}, updated_at DESC`;
+    case 'fileType':
+      return `extension ${dir}, filename ASC`;
+    case 'updated':
+      return `updated_at ${dir}, filename ASC`;
+    case 'filename':
+    default:
+      return `filename ${dir}, relative_path ASC`;
+  }
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[%_]/g, '');
 }
 
 function mapAsset(row: AssetRow): PhotoAsset {

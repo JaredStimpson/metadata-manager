@@ -18,6 +18,7 @@ import { isSupportedImagePath } from '../../shared/media';
 import {
   AppSettings,
   ExportResult,
+  ImportFilesResult,
   LocalPlace,
   MapPack,
   MapPackMetadata,
@@ -49,12 +50,16 @@ export class LibraryService {
   }
 
   async addSourceRoots(paths: string[]): Promise<SourceRoot[]> {
+    const settings = this.db.getSettings();
     const existing = this.db.listSourceRoots();
     const existingByPath = new Map(existing.map((root) => [normalizeFsPath(root.path), root]));
     const roots: SourceRoot[] = [];
 
     for (const rootPath of paths) {
       const resolved = path.resolve(rootPath);
+      if (settings.sidecarRoot && isSameOrChildPath(resolved, settings.sidecarRoot)) {
+        throw new Error('Choose photo source folders outside of the sidecar mirror folder.');
+      }
       const current = existingByPath.get(normalizeFsPath(resolved));
       if (current) {
         roots.push(current);
@@ -75,6 +80,45 @@ export class LibraryService {
     }
 
     return roots;
+  }
+
+  async addImportedFiles(paths: string[]): Promise<ImportFilesResult> {
+    const settings = this.db.getSettings();
+    const rootsByPath = new Map(this.db.listSourceRoots().map((root) => [normalizeFsPath(root.path), root]));
+    const sourceRootsById = new Map<string, SourceRoot>();
+    const assets: PhotoAsset[] = [];
+    const errors: ImportFilesResult['errors'] = [];
+    let imported = 0;
+    let skipped = 0;
+
+    for (const filePath of paths) {
+      const resolved = path.resolve(filePath);
+      try {
+        const stat = await fs.stat(resolved);
+        if (!stat.isFile() || !isSupportedImagePath(resolved)) {
+          skipped += 1;
+          continue;
+        }
+
+        const sourceRoot = await this.ensureSourceRoot(path.dirname(resolved), rootsByPath);
+        sourceRootsById.set(sourceRoot.id, sourceRoot);
+        const asset = await this.buildAsset(sourceRoot, resolved, settings);
+        this.db.upsertAsset(asset);
+        assets.push(asset);
+        imported += 1;
+      } catch (error) {
+        errors.push({ path: resolved, message: String((error as Error).message ?? error) });
+      }
+    }
+
+    await this.db.commit();
+    return {
+      sourceRoots: [...sourceRootsById.values()],
+      assets,
+      imported,
+      skipped,
+      errors
+    };
   }
 
   async scanSourceRoot(sourceRootId: string): Promise<ScanResult> {
@@ -350,6 +394,32 @@ export class LibraryService {
   private requireSourceRoot(id: string): SourceRoot {
     const sourceRoot = this.db.getSourceRoot(id);
     if (!sourceRoot) throw new Error(`Unknown source root: ${id}`);
+    return sourceRoot;
+  }
+
+  private async ensureSourceRoot(rootPath: string, rootsByPath?: Map<string, SourceRoot>): Promise<SourceRoot> {
+    const resolved = path.resolve(rootPath);
+    const map = rootsByPath ?? new Map(this.db.listSourceRoots().map((root) => [normalizeFsPath(root.path), root]));
+    const existing = map.get(normalizeFsPath(resolved));
+    if (existing) return existing;
+
+    const containingRoot = [...map.values()].find((root) => isSameOrChildPath(root.path, resolved));
+    if (containingRoot) return containingRoot;
+
+    const stat = await fs.stat(resolved);
+    if (!stat.isDirectory()) {
+      throw new Error('Imported files must belong to a readable folder.');
+    }
+
+    const sourceRoot: SourceRoot = {
+      id: crypto.randomUUID(),
+      path: resolved,
+      name: path.basename(resolved) || resolved,
+      createdAt: new Date().toISOString(),
+      lastScanAt: new Date().toISOString()
+    };
+    await this.db.upsertSourceRoot(sourceRoot);
+    map.set(normalizeFsPath(resolved), sourceRoot);
     return sourceRoot;
   }
 

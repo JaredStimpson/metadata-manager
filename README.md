@@ -76,7 +76,13 @@ Run:
 .\MapSetup.cmd
 ```
 
-Choose the starter map for a small world overview, or choose a custom area if you know the bounding box for the place you care about. After it creates a `.pmtiles` file, open the app, click Map Pack, and select that file.
+Choose the starter map for a small world overview, or choose a custom area if you know the bounding box for the place you care about. After it creates a `.pmtiles` file, open the app, open Tools, click Import Pack, and select that file.
+
+The app can also open `MapSetup.cmd` from Tools. Manual latitude/longitude entry works even before you import a map.
+
+## Main Workflow
+
+Use the left rail: Import -> Library -> Edit -> Export. Import registers files in place, the center browser shows thumbnails or details, the right inspector edits one photo or a batch, and Tools handles maps, sidecar status, and Immich staging export.
 
 ## Requirements
 
