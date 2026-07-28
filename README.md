@@ -16,6 +16,8 @@ From a fresh clone:
 
 The `.cmd` files are the beginner path. They call the PowerShell scripts with the right execution policy and do not require knowing Node, pnpm, Electron, or PMTiles.
 
+If a `.cmd` script fails, the terminal window stays open and waits for a key press so the error message is visible.
+
 ## What It Does
 
 - Scans selected photo folders in read-only mode.

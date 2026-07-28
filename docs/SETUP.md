@@ -16,6 +16,8 @@ This app is Windows-first and runs as an Electron desktop app.
 - Rebuilds Electron and esbuild native binaries.
 - Runs TypeScript and unit tests unless `-SkipVerify` is passed.
 
+If any `.cmd` wrapper fails, it prints the exit code and waits for a key press before closing. This keeps setup and launch errors visible when the script is double-clicked.
+
 ## Launch
 
 ```powershell
