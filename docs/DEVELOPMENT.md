@@ -35,6 +35,10 @@ docs/
 - `health:check` reports app version, user data path, sidecar root, tile server state, and IPC capabilities for startup diagnostics.
 - Main-process IPC validates imported map packs before storing them.
 - Map downloads are modeled as a Maintenance feature with persistent preferences and download jobs.
+- Photo sources and scanned assets are session-only and are cleared during main-process startup.
+- Selecting a source atomically replaces the prior source after the new path is validated.
+- Source IDs are deterministic hashes of normalized source paths so mirrored sidecars reconnect after a future re-selection without persisting source paths.
+- Startup migrates a legacy random-ID sidecar directory to the deterministic source ID when the destination does not already exist, then clears session rows.
 - The default sidecar mirror is outside photo source folders.
 - External links are restricted to `http` and `https` protocols.
 - Original media files are never modified by metadata saves.
@@ -66,9 +70,11 @@ Workflow parent areas:
 Maintenance parent areas:
 
 - Maps
-- Sidecar setup and diagnostics through the side tools
+- Settings and diagnostics
 
 Map setup controls belong in Maintenance -> Maps. The geotag panel can use an installed map pack, but it should not own downloading or cleanup.
+
+Sidecar storage belongs in Maintenance -> Settings. Import owns source selection, Library owns scanning and removal, Edit owns metadata and geotagging, and Export owns Immich staging. Avoid global action strips that duplicate those owners.
 
 ## Renderer
 
@@ -80,6 +86,9 @@ The React renderer owns:
 - Metadata inspector.
 - Map panel.
 - Export controls.
+- Session activity log and elapsed-time indicators.
+
+Long or multi-step renderer actions use `runTask` in `App.tsx`. The callback can append progress lines to the Activity console. It records running, informational, successful, and failed states while supporting overlapping background actions.
 
 ## Tests
 
@@ -94,6 +103,8 @@ Focused unit tests cover:
 - Desktop bridge capability shape.
 - Library query filters and sorting.
 - Library removal without deleting source files.
+- Session clearing while preserving persistent settings.
+- Current-source replacement and stable source identity.
 - Batch metadata patch generation.
 - Map download catalog defaults and estimates.
 - PMTiles rejection behavior.

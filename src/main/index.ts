@@ -35,6 +35,7 @@ async function bootstrap(): Promise<void> {
   }
   exiftool = new ExifToolService();
   library = new LibraryService(database, exiftool, process.cwd());
+  await library.clearPhotoSession();
   tileServer = new TileServer(database);
   await tileServer.start();
 
@@ -89,12 +90,12 @@ function registerIpc(): void {
     tileServerUrl: await tileServer.start()
   }));
 
-  ipcMain.handle('dialog:choosePhotoFolders', async () => {
+  ipcMain.handle('dialog:choosePhotoFolder', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
-      title: 'Choose Photo Folders',
-      properties: ['openDirectory', 'multiSelections', 'createDirectory']
+      title: 'Choose Current Photo Source',
+      properties: ['openDirectory']
     });
-    return result.canceled ? [] : result.filePaths;
+    return result.canceled ? undefined : result.filePaths[0];
   });
 
   ipcMain.handle('dialog:choosePhotoFiles', async () => {
@@ -156,7 +157,7 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('settings:update', (_event, settings: Partial<AppSettings>) => library.updateSettings(settings));
-  ipcMain.handle('library:addSourceRoots', (_event, paths: string[]) => library.addSourceRoots(paths));
+  ipcMain.handle('library:setSourceRoot', (_event, sourcePath: string) => library.setSourceRoot(sourcePath));
   ipcMain.handle('library:addImportedFiles', (_event, paths: string[]) => library.addImportedFiles(paths));
   ipcMain.handle('library:removeAssets', (_event, assetIds: string[]) => library.removeAssetsFromLibrary(assetIds));
   ipcMain.handle('library:scan', (_event, sourceRootId: string) => library.scanSourceRoot(sourceRootId));

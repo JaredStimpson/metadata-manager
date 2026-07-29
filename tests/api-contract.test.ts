@@ -6,8 +6,9 @@ describe('desktop bridge contract', () => {
     expect(photoMetadataCapabilities).toEqual(
       expect.arrayContaining([
         'healthCheck',
-        'choosePhotoFolders',
+        'choosePhotoFolder',
         'choosePhotoFiles',
+        'setSourceRoot',
         'addImportedFiles',
         'removeAssetsFromLibrary',
         'scanSourceRoot',

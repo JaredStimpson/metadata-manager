@@ -120,14 +120,20 @@ export function MapPanel({
           <input
             placeholder="Latitude"
             value={manualLatitude}
+            title="Enter a latitude from -90 to 90 when no offline map is installed"
             onChange={(event) => setManualLatitude(event.target.value)}
           />
           <input
             placeholder="Longitude"
             value={manualLongitude}
+            title="Enter a longitude from -180 to 180 when no offline map is installed"
             onChange={(event) => setManualLongitude(event.target.value)}
           />
-          <button disabled={!manualPin} onClick={() => manualPin && onApplyLocation(manualPin.latitude, manualPin.longitude)}>
+          <button
+            disabled={!manualPin}
+            onClick={() => manualPin && onApplyLocation(manualPin.latitude, manualPin.longitude)}
+            title="Save these valid manual coordinates to the selected photos"
+          >
             Apply
           </button>
         </div>
@@ -139,13 +145,22 @@ export function MapPanel({
     <div className="map-panel">
       <div className="place-search">
         <Search size={15} />
-        <input value={placeQuery} onChange={(event) => setPlaceQuery(event.target.value)} placeholder="Offline place search" />
-        <button onClick={searchPlaces}>Find</button>
+        <input
+          value={placeQuery}
+          onChange={(event) => setPlaceQuery(event.target.value)}
+          placeholder="Offline place search"
+          title="Search installed place packs without using the internet"
+        />
+        <button onClick={searchPlaces} title="Search installed offline place databases">Find</button>
       </div>
       {places.length > 0 && (
         <div className="place-results">
           {places.map((place) => (
-            <button key={`${place.id}-${place.latitude}-${place.longitude}`} onClick={() => moveTo(place.latitude, place.longitude)}>
+            <button
+              key={`${place.id}-${place.latitude}-${place.longitude}`}
+              onClick={() => moveTo(place.latitude, place.longitude)}
+              title={`Move the map pin to ${place.name}`}
+            >
               <span>{place.name}</span>
               <small>{[place.region, place.country].filter(Boolean).join(', ')}</small>
             </button>
@@ -164,7 +179,11 @@ export function MapPanel({
           <Crosshair size={15} />
           {pin ? `${pin.latitude.toFixed(6)}, ${pin.longitude.toFixed(6)}` : 'No pin'}
         </span>
-        <button disabled={!pin} onClick={() => pin && onApplyLocation(pin.latitude, pin.longitude)}>
+        <button
+          disabled={!pin}
+          onClick={() => pin && onApplyLocation(pin.latitude, pin.longitude)}
+          title="Write the current map pin coordinates to mirrored sidecars for all selected photos"
+        >
           <Navigation size={15} /> Apply Pin
         </button>
       </div>

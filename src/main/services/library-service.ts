@@ -1,6 +1,7 @@
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
@@ -60,8 +61,8 @@ export class LibraryService {
     if (settings.sidecarRoot) {
       const resolved = path.resolve(settings.sidecarRoot);
       for (const sourceRoot of this.db.listSourceRoots()) {
-        if (isSameOrChildPath(sourceRoot.path, resolved)) {
-          throw new Error('Choose a sidecar mirror folder outside of your photo source folders.');
+        if (isSameOrChildPath(sourceRoot.path, resolved) || isSameOrChildPath(resolved, sourceRoot.path)) {
+          throw new Error('Choose a sidecar mirror folder that is separate from your current photo source.');
         }
       }
       settings.sidecarRoot = resolved;
@@ -69,43 +70,40 @@ export class LibraryService {
     return this.db.updateSettings(settings);
   }
 
-  async addSourceRoots(paths: string[]): Promise<SourceRoot[]> {
+  async clearPhotoSession(): Promise<void> {
+    await this.migrateLegacySidecarDirectories();
+    await this.db.clearPhotoSession();
+  }
+
+  async setSourceRoot(rootPath: string): Promise<SourceRoot> {
     const settings = this.db.getSettings();
-    const existing = this.db.listSourceRoots();
-    const existingByPath = new Map(existing.map((root) => [normalizeFsPath(root.path), root]));
-    const roots: SourceRoot[] = [];
-
-    for (const rootPath of paths) {
-      const resolved = path.resolve(rootPath);
-      if (settings.sidecarRoot && isSameOrChildPath(resolved, settings.sidecarRoot)) {
-        throw new Error('Choose photo source folders outside of the sidecar mirror folder.');
-      }
-      const current = existingByPath.get(normalizeFsPath(resolved));
-      if (current) {
-        roots.push(current);
-        continue;
-      }
-
-      const stat = await fs.stat(resolved);
-      if (!stat.isDirectory()) continue;
-
-      const sourceRoot: SourceRoot = {
-        id: crypto.randomUUID(),
-        path: resolved,
-        name: path.basename(resolved) || resolved,
-        createdAt: new Date().toISOString()
-      };
-      await this.db.upsertSourceRoot(sourceRoot);
-      roots.push(sourceRoot);
+    const resolved = path.resolve(rootPath);
+    if (
+      settings.sidecarRoot &&
+      (isSameOrChildPath(resolved, settings.sidecarRoot) || isSameOrChildPath(settings.sidecarRoot, resolved))
+    ) {
+      throw new Error('Choose a photo source that is separate from the sidecar mirror folder.');
     }
 
-    return roots;
+    const stat = await fs.stat(resolved);
+    if (!stat.isDirectory()) throw new Error('The current source must be a readable folder.');
+
+    const sourceRoot: SourceRoot = {
+      id: sourceRootId(resolved),
+      path: resolved,
+      name: path.basename(resolved) || resolved,
+      createdAt: new Date().toISOString()
+    };
+
+    await this.db.replacePhotoSessionSource(sourceRoot);
+    return sourceRoot;
   }
 
   async addImportedFiles(paths: string[]): Promise<ImportFilesResult> {
     const settings = this.db.getSettings();
-    const rootsByPath = new Map(this.db.listSourceRoots().map((root) => [normalizeFsPath(root.path), root]));
-    const sourceRootsById = new Map<string, SourceRoot>();
+    const sourceRoot = this.db.listSourceRoots()[0];
+    if (!sourceRoot) throw new Error('Choose a current source folder before adding individual photos.');
+
     const assets: PhotoAsset[] = [];
     const errors: ImportFilesResult['errors'] = [];
     let imported = 0;
@@ -114,14 +112,19 @@ export class LibraryService {
     for (const filePath of paths) {
       const resolved = path.resolve(filePath);
       try {
+        if (!isSameOrChildPath(sourceRoot.path, resolved)) {
+          errors.push({
+            path: resolved,
+            message: `Photo is outside the current source "${sourceRoot.name}". Choose that folder as a new source first.`
+          });
+          continue;
+        }
         const stat = await fs.stat(resolved);
         if (!stat.isFile() || !isSupportedImagePath(resolved)) {
           skipped += 1;
           continue;
         }
 
-        const sourceRoot = await this.ensureSourceRoot(path.dirname(resolved), rootsByPath);
-        sourceRootsById.set(sourceRoot.id, sourceRoot);
         const asset = await this.buildAsset(sourceRoot, resolved, settings);
         this.db.upsertAsset(asset);
         assets.push(asset);
@@ -133,7 +136,7 @@ export class LibraryService {
 
     await this.db.commit();
     return {
-      sourceRoots: [...sourceRootsById.values()],
+      sourceRoots: [sourceRoot],
       assets,
       imported,
       skipped,
@@ -568,30 +571,29 @@ export class LibraryService {
     return sourceRoot;
   }
 
-  private async ensureSourceRoot(rootPath: string, rootsByPath?: Map<string, SourceRoot>): Promise<SourceRoot> {
-    const resolved = path.resolve(rootPath);
-    const map = rootsByPath ?? new Map(this.db.listSourceRoots().map((root) => [normalizeFsPath(root.path), root]));
-    const existing = map.get(normalizeFsPath(resolved));
-    if (existing) return existing;
+  private async migrateLegacySidecarDirectories(): Promise<void> {
+    const sidecarRoot = this.db.getSettings().sidecarRoot;
+    if (!sidecarRoot) return;
 
-    const containingRoot = [...map.values()].find((root) => isSameOrChildPath(root.path, resolved));
-    if (containingRoot) return containingRoot;
+    for (const sourceRoot of this.db.listSourceRoots()) {
+      const stableId = sourceRootId(sourceRoot.path);
+      if (stableId === sourceRoot.id || !/^[a-zA-Z0-9-]+$/.test(sourceRoot.id)) continue;
 
-    const stat = await fs.stat(resolved);
-    if (!stat.isDirectory()) {
-      throw new Error('Imported files must belong to a readable folder.');
+      const legacyDirectory = path.join(sidecarRoot, sourceRoot.id);
+      const stableDirectory = path.join(sidecarRoot, stableId);
+      try {
+        await fs.access(stableDirectory);
+        continue;
+      } catch {
+        // A missing stable directory can be populated by moving the legacy mirror.
+      }
+
+      try {
+        await fs.rename(legacyDirectory, stableDirectory);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
     }
-
-    const sourceRoot: SourceRoot = {
-      id: crypto.randomUUID(),
-      path: resolved,
-      name: path.basename(resolved) || resolved,
-      createdAt: new Date().toISOString(),
-      lastScanAt: new Date().toISOString()
-    };
-    await this.db.upsertSourceRoot(sourceRoot);
-    map.set(normalizeFsPath(resolved), sourceRoot);
-    return sourceRoot;
   }
 
   private async buildAsset(sourceRoot: SourceRoot, filePath: string, settings: AppSettings): Promise<PhotoAsset> {
@@ -673,6 +675,11 @@ function applyPatchForSave(base: MetadataFields, patch: MetadataPatch): Metadata
 
 function normalizeFsPath(filePath: string): string {
   return path.resolve(filePath).toLowerCase();
+}
+
+function sourceRootId(filePath: string): string {
+  const digest = createHash('sha256').update(normalizeFsPath(filePath)).digest('hex').slice(0, 24);
+  return `source-${digest}`;
 }
 
 function isSameOrChildPath(parent: string, child: string): boolean {

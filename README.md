@@ -2,7 +2,7 @@
 
 Windows-first desktop app for local, non-destructive photo metadata editing.
 
-The app scans selected photo folders, reads embedded metadata and existing sidecars, writes edits only to a separate mirrored XMP sidecar library, and can create an Immich-ready staging folder with sidecars placed next to staged media files.
+The app opens one photo source per session, reads embedded metadata and existing sidecars, writes edits only to a separate mirrored XMP sidecar library, and can create an Immich-ready staging folder with sidecars placed next to staged media files.
 
 ## Quick Start on Windows
 
@@ -20,7 +20,7 @@ If a `.cmd` script fails, the terminal window stays open and waits for a key pre
 
 ## What It Does
 
-- Scans selected photo folders in read-only mode.
+- Scans one current photo source in read-only mode and forgets its path when the app closes.
 - Writes metadata edits to a separate mirrored XMP sidecar library.
 - Supports Immich-compatible sidecar fields: description, rating, date/time, GPS latitude/longitude, and tags.
 - Imports offline `.pmtiles` map packs for MapLibre-based geotagging.
@@ -70,21 +70,25 @@ Equivalent PowerShell scripts live in `scripts/`.
 
 ## Getting Offline Maps
 
-Run:
+The normal setup path is inside the app:
 
-```powershell
-.\MapSetup.cmd
-```
+1. Open Maintenance -> Maps.
+2. Select regions and a detail level.
+3. Confirm the estimated size is under the active budget.
+4. Click Download Selected.
+5. Use the downloaded pack in Edit -> Geotag Map.
 
-Choose the starter map for a small world overview, or choose a custom area if you know the bounding box for the place you care about. After it creates a `.pmtiles` file, open the app, open Tools, click Import Pack, and select that file.
+Existing vector `.pmtiles` files can be registered with the import button in Installed Packs.
 
-The app can also open `MapSetup.cmd` from Tools. Manual latitude/longitude entry works even before you import a map.
+`MapSetup.cmd` remains an advanced fallback and can be opened from Maps -> Download History -> Script Fallback. Manual latitude/longitude entry works before a map is installed.
 
 ## Main Workflow
 
-Use the left rail: Import -> Library -> Edit -> Export. Import registers files in place, the center browser shows thumbnails or details, and the right inspector edits one photo or a batch.
+Use the left rail: Import -> Library -> Edit -> Export. Import chooses the current source, Library shows thumbnails or details, and Edit opens the metadata inspector for one photo or a batch. Choosing a different source clears the old session view without deleting any files.
 
 Maps live under Maintenance -> Maps. That tab handles region/detail download setup, the active map budget, installed packs, and map download history.
+
+Sidecar storage and desktop diagnostics live under Maintenance -> Settings. The Activity console at the bottom records each operation, progress step, error, and elapsed time. Hover controls for an explanation of what they do.
 
 ## Requirements
 

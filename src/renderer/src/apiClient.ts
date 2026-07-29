@@ -40,12 +40,12 @@ export function hasDesktopBridge(): boolean {
 export const apiClient = {
   healthCheck: () => call('Health check', (api) => api.healthCheck()),
   getInitialState: () => call('Load app state', (api) => api.getInitialState()),
-  choosePhotoFolders: () => call('Choose photo folders', (api) => api.choosePhotoFolders()),
+  choosePhotoFolder: () => call('Choose current photo source', (api) => api.choosePhotoFolder()),
   choosePhotoFiles: () => call('Choose photo files', (api) => api.choosePhotoFiles()),
   chooseDirectory: (title?: string) => call('Choose folder', (api) => api.chooseDirectory(title)),
   chooseMapPack: () => call('Choose map pack', (api) => api.chooseMapPack()),
   updateSettings: (settings: Partial<AppSettings>) => call('Update settings', (api) => api.updateSettings(settings)),
-  addSourceRoots: (paths: string[]) => call('Register source folders', (api) => api.addSourceRoots(paths)),
+  setSourceRoot: (path: string) => call('Set current photo source', (api) => api.setSourceRoot(path)),
   addImportedFiles: (paths: string[]) => call('Register photo files', (api) => api.addImportedFiles(paths)),
   removeAssetsFromLibrary: (assetIds: string[]) =>
     call('Remove photos from library', (api) => api.removeAssetsFromLibrary(assetIds)),

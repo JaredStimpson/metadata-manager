@@ -1,5 +1,4 @@
 import {
-  Archive,
   CheckCircle2,
   Download,
   ExternalLink,
@@ -66,18 +65,7 @@ export function MapMaintenancePanel({
       <div className="maintenance-header">
         <div>
           <h1>Maps</h1>
-          <span>Maintenance / Maps / regions, detail, installed packs</span>
-        </div>
-        <div className="button-row wrap">
-          <button onClick={onOpenMapSetup}>
-            <Settings size={16} /> MapSetup.cmd
-          </button>
-          <button onClick={onImportPack}>
-            <Map size={16} /> Import Pack
-          </button>
-          <button onClick={onOpenDocs}>
-            <ExternalLink size={16} /> Get Maps
-          </button>
+          <span>Maintenance / choose coverage, control size, manage offline packs</span>
         </div>
       </div>
 
@@ -95,7 +83,11 @@ export function MapMaintenancePanel({
               const selected = draft.regionIds.includes(region.id);
               const estimated = detail ? region.estimateMbByMaxZoom[detail.maxZoom] ?? 0 : 0;
               return (
-                <label key={region.id} className={selected ? 'region-item selected' : 'region-item'}>
+                <label
+                  key={region.id}
+                  className={selected ? 'region-item selected' : 'region-item'}
+                  title={`Include ${region.label} in the next download at the selected detail level`}
+                >
                   <input type="checkbox" checked={selected} onChange={() => toggleRegion(region.id)} />
                   <span>
                     <strong>{region.label}</strong>
@@ -122,6 +114,7 @@ export function MapMaintenancePanel({
                 key={option.id}
                 className={draft.detailId === option.id ? 'active' : ''}
                 onClick={() => onDraftChange({ ...draft, detailId: option.id })}
+                title={`${option.description} Downloads through zoom ${option.maxZoom}.`}
               >
                 <strong>{option.label}</strong>
                 <small>z{option.maxZoom}</small>
@@ -138,6 +131,7 @@ export function MapMaintenancePanel({
                 max="25"
                 step="0.5"
                 value={(budgetBytes / 1024 / 1024 / 1024).toString()}
+                title="Maximum estimated size allowed for one selected map download"
                 onChange={(event) =>
                   onDraftChange({
                     ...draft,
@@ -161,8 +155,8 @@ export function MapMaintenancePanel({
           <label>
             Output folder
             <div className="path-picker">
-              <input value={outputDirectory} readOnly />
-              <button onClick={onChooseOutputDirectory}>
+              <input value={outputDirectory} readOnly title="Folder where newly downloaded PMTiles packs will be stored" />
+              <button onClick={onChooseOutputDirectory} title="Choose where downloaded PMTiles files are stored">
                 <FolderOpen size={16} />
               </button>
             </div>
@@ -173,15 +167,21 @@ export function MapMaintenancePanel({
             <input
               value={draft.sourceUrl ?? ''}
               placeholder="Blank uses latest Protomaps build"
+              title="Advanced: provide a specific public PMTiles source URL, or leave blank for the current Protomaps build"
               onChange={(event) => onDraftChange({ ...draft, sourceUrl: event.target.value || undefined })}
             />
           </label>
 
           <div className="button-row wrap">
-            <button onClick={onSavePreferences}>
+            <button onClick={onSavePreferences} title="Remember selected regions, detail, budget, output folder, and source URL">
               <CheckCircle2 size={16} /> Save Setup
             </button>
-            <button className="primary" disabled={Boolean(busy) || draft.regionIds.length === 0 || overBudget} onClick={onDownloadSelection}>
+            <button
+              className="primary"
+              disabled={Boolean(busy) || draft.regionIds.length === 0 || overBudget}
+              onClick={onDownloadSelection}
+              title="Download and extract each selected region into a validated offline PMTiles pack"
+            >
               <Download size={16} /> Download Selected
             </button>
           </div>
@@ -193,7 +193,9 @@ export function MapMaintenancePanel({
               <h2>Installed Packs</h2>
               <span>{installedPacks.length} ready for offline use</span>
             </div>
-            <Archive size={17} />
+            <button onClick={onImportPack} title="Register an existing vector PMTiles or offline place-search SQLite pack">
+              <Map size={16} />
+            </button>
           </div>
           <div className="installed-map-list">
             {installedPacks.length === 0 ? (
@@ -211,11 +213,20 @@ export function MapMaintenancePanel({
                     <small title={pack.path}>{pack.path}</small>
                   </div>
                   <div className="installed-map-actions">
-                    <button disabled={settings.activeMapPackId === pack.id} onClick={() => onSetActiveMapPack(pack.id)}>
+                    <button
+                      disabled={settings.activeMapPackId === pack.id}
+                      onClick={() => onSetActiveMapPack(pack.id)}
+                      title="Use this PMTiles pack in the geotag editor"
+                    >
                       Use
                     </button>
-                    <button onClick={() => onRemoveMapPack(pack.id, false)}>Unregister</button>
-                    <button onClick={() => onRemoveMapPack(pack.id, true)} title="Delete app-managed map file">
+                    <button
+                      onClick={() => onRemoveMapPack(pack.id, false)}
+                      title="Forget this pack in the app while leaving its file on disk"
+                    >
+                      Unregister
+                    </button>
+                    <button onClick={() => onRemoveMapPack(pack.id, true)} title="Delete this app-managed map file from disk and unregister it">
                       <Trash2 size={15} />
                     </button>
                   </div>
@@ -249,6 +260,14 @@ export function MapMaintenancePanel({
                 </div>
               ))
             )}
+          </div>
+          <div className="map-support-actions">
+            <button onClick={onOpenMapSetup} title="Open the command-line map setup fallback in a terminal window">
+              <Settings size={15} /> Script Fallback
+            </button>
+            <button onClick={onOpenDocs} title="Open the official Protomaps download documentation in your browser">
+              <ExternalLink size={15} /> Map Source Docs
+            </button>
           </div>
         </section>
       </div>

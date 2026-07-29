@@ -4,13 +4,20 @@
 
 1. Launch the app with `Run.cmd`.
 2. Use the left rail in order: Import, Library, Edit, Export.
-3. In Import, choose individual photo files or whole folders.
-4. Keep the default sidecar mirror or choose another mirror folder.
+3. In Import, choose one folder as the current source. The app scans it and opens Library.
+4. Keep the default sidecar mirror or choose another under Maintenance -> Settings.
 5. Use Maintenance -> Maps for map downloads, installed packs, and active map selection.
 
-## Source Folders
+## Current Source
 
-Import is non-destructive registration. Source folders and individual files are read-only inputs. The app scans supported photo files and reads:
+Import is non-destructive, session-only registration. The app has exactly one current source:
+
+- Choosing a different source clears the previous library view before scanning the new folder.
+- Closing the app forgets the source path and cached photo records.
+- Source photos, mirrored sidecars, map packs, and persistent settings remain on disk.
+- Add Specific Photos registers selected files only when they are inside the current source.
+
+The app scans supported photo files and reads:
 
 - Embedded metadata through `exiftool-vendored`.
 - Adjacent sidecars if they already exist next to the media.
@@ -37,14 +44,17 @@ Selection controls:
 - Ctrl+A selects all filtered photos when the browser has focus.
 - Remove From Library unregisters selected photos from the app without deleting files.
 
+The current-source indicator above the browser shows only the active source. Rescan beside it checks that folder for new or changed photos.
+
 ## Geotagging
 
 With an offline map pack installed:
 
 1. Select a photo or batch of photos.
-2. Click or drag the map pin.
-3. Use Apply Pin.
-4. The coordinates are saved to mirror sidecars.
+2. Open Edit and use the map button in the Metadata panel.
+3. Click or drag the map pin.
+4. Use Apply Pin.
+5. The coordinates are saved to mirror sidecars.
 
 Without a map pack, use the manual latitude and longitude fields.
 
@@ -69,3 +79,9 @@ The export tries to hardlink media first. If hardlinking fails, it copies the me
 ## Bridge Health
 
 The startup banner shows whether the Electron preload bridge is connected. If the app is opened as plain HTML in a browser, it shows a clear "Desktop bridge unavailable" screen because file dialogs, scans, sidecar writes, map import, and export require Electron.
+
+## Activity And Help
+
+The docked Activity console shows a terminal-style session log. Every operation has a start line, progress messages, success or failure state, and elapsed time while running. Errors automatically expand the console so failures do not disappear.
+
+Hover buttons, fields, status pills, source indicators, and map controls for a short explanation. Configuration controls are kept under Maintenance, while photo actions stay in Import, Library, Edit, or Export.

@@ -233,12 +233,12 @@ export interface LocalPlace {
 export interface PhotoMetadataApi {
   healthCheck(): Promise<HealthStatus>;
   getInitialState(): Promise<InitialState>;
-  choosePhotoFolders(): Promise<string[]>;
+  choosePhotoFolder(): Promise<string | undefined>;
   choosePhotoFiles(): Promise<string[]>;
   chooseDirectory(title?: string): Promise<string | undefined>;
   chooseMapPack(): Promise<string | undefined>;
   updateSettings(settings: Partial<AppSettings>): Promise<AppSettings>;
-  addSourceRoots(paths: string[]): Promise<SourceRoot[]>;
+  setSourceRoot(path: string): Promise<SourceRoot>;
   addImportedFiles(paths: string[]): Promise<ImportFilesResult>;
   removeAssetsFromLibrary(assetIds: string[]): Promise<RemoveAssetsResult>;
   scanSourceRoot(sourceRootId: string): Promise<ScanResult>;
@@ -261,12 +261,12 @@ export interface PhotoMetadataApi {
 export const photoMetadataCapabilities = [
   'healthCheck',
   'getInitialState',
-  'choosePhotoFolders',
+  'choosePhotoFolder',
   'choosePhotoFiles',
   'chooseDirectory',
   'chooseMapPack',
   'updateSettings',
-  'addSourceRoots',
+  'setSourceRoot',
   'addImportedFiles',
   'removeAssetsFromLibrary',
   'scanSourceRoot',

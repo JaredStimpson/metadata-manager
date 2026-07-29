@@ -100,15 +100,22 @@ p {
   height: 100vh;
   min-width: 0;
   display: grid;
-  grid-template-columns: 88px minmax(540px, 1fr) 360px 390px;
+  grid-template-columns: 88px minmax(540px, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   background: #f4f5f1;
 }
 
-.workflow-shell.tools-closed {
+.workflow-shell.editor-open {
   grid-template-columns: 88px minmax(540px, 1fr) 360px;
 }
 
+.workflow-shell.editor-open.map-open {
+  grid-template-columns: 88px minmax(540px, 1fr) 360px 390px;
+}
+
 .workflow-rail {
+  grid-column: 1;
+  grid-row: 1 / -1;
   min-height: 0;
   border-right: 1px solid #d6ddd6;
   background: #172422;
@@ -183,9 +190,21 @@ p {
 
 .library-stage {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
   padding: 14px;
+}
+
+.library-stage.area-import,
+.library-stage.area-library,
+.library-stage.area-edit {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.library-stage,
+.maintenance-stage {
+  grid-column: 2;
+  grid-row: 1;
 }
 
 .maintenance-stage {
@@ -198,7 +217,6 @@ p {
 }
 
 .status-banner,
-.quick-actions,
 .workflow-card,
 .browser-panel,
 .inspector-section {
@@ -285,13 +303,6 @@ p {
   background: #edf8f5;
 }
 
-.quick-actions {
-  display: flex;
-  gap: 8px;
-  padding: 10px;
-  overflow-x: auto;
-}
-
 .workflow-card {
   min-height: 118px;
   display: grid;
@@ -299,6 +310,59 @@ p {
   gap: 14px;
   align-items: center;
   padding: 14px;
+}
+
+.import-workspace {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  border: 1px solid #d6ddd6;
+  border-radius: 8px;
+  background: #fffefa;
+  padding: 22px;
+}
+
+.import-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.import-heading > div:first-child {
+  display: grid;
+  gap: 7px;
+}
+
+.import-heading h1 {
+  font-size: 22px;
+}
+
+.import-heading p,
+.panel-copy,
+.import-session-note span {
+  color: #6a716b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.import-session-note {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid #b8d6ce;
+  border-radius: 8px;
+  background: #edf8f5;
+  color: #23645d;
+  padding: 12px;
+}
+
+.import-session-note div {
+  display: grid;
+  gap: 3px;
 }
 
 .workflow-card h1 {
@@ -383,6 +447,57 @@ p {
   font-size: 22px;
 }
 
+.browser-header-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.current-source-chip {
+  min-width: 0;
+  max-width: 240px;
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #d6ddd6;
+  border-radius: 999px;
+  background: #f7f8f4;
+  padding: 4px 11px;
+  color: #6a716b;
+}
+
+.current-source-chip.active {
+  border-color: #9ac8bd;
+  background: #edf8f5;
+  color: #23645d;
+}
+
+.current-source-chip > span {
+  min-width: 0;
+  display: grid;
+}
+
+.current-source-chip small,
+.current-source-chip strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.current-source-chip small {
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.current-source-chip strong {
+  font-size: 12px;
+}
+
 .view-toggle {
   display: flex;
   border: 1px solid #c9d0c9;
@@ -404,7 +519,7 @@ p {
 }
 
 .library-toolbar {
-  grid-template-columns: minmax(180px, 1.4fr) minmax(130px, 0.8fr) minmax(120px, 0.7fr) minmax(120px, 0.7fr) auto;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(130px, 0.8fr) minmax(120px, 0.7fr) auto;
 }
 
 .filter-row {
@@ -670,6 +785,8 @@ p {
 
 .map-plan-panel {
   grid-row: 1 / -1;
+  overflow: auto;
+  padding-right: 10px;
 }
 
 .jobs-panel {
@@ -840,12 +957,33 @@ p {
   background: #fff0f5;
 }
 
+.map-support-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.map-support-actions button {
+  min-height: 30px;
+  font-size: 11px;
+}
+
 .metadata-inspector,
 .tools-drawer {
+  grid-row: 1;
   overflow: auto;
   border-left: 1px solid #d6ddd6;
   background: #eef1ec;
   padding: 14px;
+}
+
+.metadata-inspector {
+  grid-column: 3;
+}
+
+.tools-drawer {
+  grid-column: 4;
 }
 
 .metadata-inspector,
@@ -874,6 +1012,18 @@ p {
 .panel-title button {
   min-width: 34px;
   padding: 0;
+}
+
+.panel-title-actions {
+  display: flex !important;
+  grid-auto-flow: column;
+  gap: 6px !important;
+}
+
+.panel-title-actions button.active {
+  border-color: #23645d;
+  background: #23645d;
+  color: #ffffff;
 }
 
 .two-col,
@@ -1152,10 +1302,157 @@ p {
   padding: 8px 10px;
 }
 
+.settings-maintenance {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+.settings-grid {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+  align-content: start;
+  gap: 10px;
+}
+
+.panel-copy {
+  margin: 0;
+}
+
+.activity-console {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  min-width: 0;
+  height: 210px;
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
+  border-top: 1px solid #34433f;
+  background: #101816;
+  color: #d8e3de;
+}
+
+.activity-console.collapsed {
+  height: 38px;
+  grid-template-rows: 38px;
+}
+
+.activity-console > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 9px 0 12px;
+  border-bottom: 1px solid #2b3935;
+  background: #17211f;
+}
+
+.activity-title,
+.activity-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.activity-title strong {
+  font-size: 12px;
+}
+
+.activity-title span {
+  min-width: 0;
+  overflow: hidden;
+  color: #8fa59e;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-actions button {
+  width: 29px;
+  min-width: 29px;
+  min-height: 28px;
+  border-color: #40504b;
+  background: transparent;
+  color: #b8c9c3;
+  padding: 0;
+}
+
+.activity-actions button:hover:not(:disabled) {
+  border-color: #668078;
+  background: #26332f;
+}
+
+.activity-output {
+  min-height: 0;
+  overflow: auto;
+  padding: 7px 12px 10px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+}
+
+.activity-empty {
+  color: #758a83;
+  padding: 4px 0;
+}
+
+.activity-line {
+  min-width: 0;
+  min-height: 24px;
+  display: grid;
+  grid-template-columns: 76px 14px minmax(90px, auto) minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  border-bottom: 1px solid rgba(95, 119, 111, 0.16);
+}
+
+.activity-line time,
+.activity-line small {
+  color: #6f847d;
+}
+
+.activity-line strong {
+  color: #c7d6d1;
+  font-weight: 600;
+}
+
+.activity-line span {
+  min-width: 0;
+  overflow: hidden;
+  color: #aebfb9;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-line.running svg {
+  color: #e1be61;
+}
+
+.activity-line.success svg {
+  color: #63b79f;
+}
+
+.activity-line.error svg,
+.activity-line.error span {
+  color: #ef8fb0;
+}
+
+.activity-line.info svg {
+  color: #6f9fc6;
+  fill: #6f9fc6;
+}
+
 @media (max-width: 1280px) {
   .workflow-shell,
-  .workflow-shell.tools-closed {
+  .workflow-shell.editor-open {
     grid-template-columns: 78px minmax(480px, 1fr) 330px;
+  }
+
+  .workflow-shell:not(.editor-open) {
+    grid-template-columns: 78px minmax(480px, 1fr);
   }
 
   .tools-drawer {
@@ -1164,6 +1461,10 @@ p {
     width: min(420px, calc(100vw - 78px));
     z-index: 10;
     box-shadow: -14px 0 34px rgba(32, 37, 34, 0.18);
+  }
+
+  .workflow-shell.editor-open.map-open {
+    grid-template-columns: 78px minmax(480px, 1fr) 330px;
   }
 
   .library-toolbar {
@@ -1191,6 +1492,10 @@ p {
     grid-template-columns: minmax(280px, 1fr) minmax(320px, 1fr);
     grid-template-rows: auto auto;
     overflow: auto;
+  }
+
+  .settings-grid {
+    grid-template-columns: repeat(2, minmax(280px, 1fr));
   }
 
   .region-panel,

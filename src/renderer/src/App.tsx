@@ -21,12 +21,18 @@ import {
   Settings,
   SlidersHorizontal,
   Tags,
+  Terminal,
   Trash2,
   Upload,
   X
 } from 'lucide-react';
 import { MapPanel } from './components/MapPanel';
 import { MapMaintenancePanel } from './components/MapMaintenancePanel';
+import {
+  ActivityConsole,
+  ActivityEntry,
+  RunningActivity
+} from './components/ActivityConsole';
 import { apiClient, formatError, hasDesktopBridge } from './apiClient';
 import {
   buildMetadataPatch,
@@ -54,7 +60,8 @@ import {
 } from '../../shared/types';
 
 type WorkflowStep = 'import' | 'library' | 'edit' | 'export';
-type AppArea = WorkflowStep | 'maps';
+type MaintenanceStep = 'maps' | 'settings';
+type AppArea = WorkflowStep | MaintenanceStep;
 type BrowserView = 'thumbnail' | 'detail';
 
 const defaultQuery: AssetQuery = {
@@ -71,8 +78,9 @@ const workflowSteps: Array<{ id: WorkflowStep; label: string; icon: typeof Uploa
   { id: 'export', label: 'Export', icon: Archive }
 ];
 
-const maintenanceSteps: Array<{ id: AppArea; label: string; icon: typeof Upload }> = [
-  { id: 'maps', label: 'Maps', icon: Map }
+const maintenanceSteps: Array<{ id: MaintenanceStep; label: string; icon: typeof Upload }> = [
+  { id: 'maps', label: 'Maps', icon: Map },
+  { id: 'settings', label: 'Settings', icon: Settings }
 ];
 
 const sortOptions: Array<{ value: AssetSortBy; label: string }> = [
@@ -112,9 +120,11 @@ export function App(): JSX.Element {
   const [query, setQuery] = useState<AssetQuery>(defaultQuery);
   const [browserView, setBrowserView] = useState<BrowserView>('thumbnail');
   const [activeStep, setActiveStep] = useState<AppArea>('import');
-  const [toolsOpen, setToolsOpen] = useState(true);
+  const [mapOpen, setMapOpen] = useState(false);
+  const [activityCollapsed, setActivityCollapsed] = useState(false);
+  const [activityEntries, setActivityEntries] = useState<ActivityEntry[]>([]);
+  const [runningActivities, setRunningActivities] = useState<RunningActivity[]>([]);
   const [initialized, setInitialized] = useState(false);
-  const [busy, setBusy] = useState<string>();
   const [notice, setNotice] = useState('Starting desktop bridge...');
   const [form, setForm] = useState<MetadataFormState>(emptyMetadataForm);
   const [dirtyFields, setDirtyFields] = useState<DirtyMetadataFields>(() => new Set());
@@ -123,6 +133,9 @@ export function App(): JSX.Element {
 
   const selectedAssets = useMemo(() => assets.filter((asset) => selectedIds.includes(asset.id)), [assets, selectedIds]);
   const selectedAsset = selectedAssets[0];
+  const currentSource = sourceRoots[0];
+  const activeActivity = runningActivities[runningActivities.length - 1];
+  const busy = activeActivity?.label;
   const activeMapPack = useMemo(
     () => mapPacks.find((pack) => pack.id === settings.activeMapPackId && pack.kind === 'pmtiles'),
     [mapPacks, settings.activeMapPackId]
@@ -150,7 +163,13 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (!initialized) return;
-    void runTask('Refresh library', () => refreshAssets(query));
+    const timer = window.setTimeout(() => {
+      void runTask('Refresh library', async (progress) => {
+        progress('Applying the active search, filters, and sort order.');
+        await refreshAssets(query);
+      });
+    }, 180);
+    return () => window.clearTimeout(timer);
   }, [initialized, query]);
 
   useEffect(() => {
@@ -162,16 +181,19 @@ export function App(): JSX.Element {
   }, [selectedAssets]);
 
   async function loadInitial(): Promise<void> {
-    await runTask('Startup health check', async () => {
+    await runTask('Startup health check', async (progress) => {
+      progress('Checking the Electron bridge and local services.');
       const nextHealth = await apiClient.healthCheck();
+      progress('Loading persistent sidecar and map settings.');
       const state = await apiClient.getInitialState();
       const nextPlan = await apiClient.getMapDownloadPlan();
       applyInitialState(state);
       applyMapPlan(nextPlan);
       setHealth(nextHealth);
+      progress('Confirming the photo session starts empty.');
       await refreshAssets(defaultQuery);
       setInitialized(true);
-      setNotice('Desktop bridge connected. Source folders stay unchanged.');
+      setNotice('Ready. Choose a source for this session; previous source folders are not remembered.');
     });
   }
 
@@ -202,36 +224,61 @@ export function App(): JSX.Element {
   }
 
   async function importFiles(): Promise<void> {
-    const paths = await runTask('Choose photo files', () => apiClient.choosePhotoFiles());
+    if (!currentSource) {
+      setNotice('Choose a current source before adding individual photos.');
+      setActiveStep('import');
+      return;
+    }
+    const paths = await runTask('Choose photo files', async (progress) => {
+      progress(`Showing files inside the current source: ${currentSource.name}.`);
+      return apiClient.choosePhotoFiles();
+    });
     if (!paths?.length) return;
 
-    await runTask('Import files', async () => {
+    await runTask('Add photos', async (progress) => {
+      progress(`Reading metadata from ${paths.length} selected file${paths.length === 1 ? '' : 's'}.`);
       const result = await apiClient.addImportedFiles(paths);
-      await reloadInitialState();
+      progress('Refreshing the current library view.');
       await refreshAssets(query);
       setSelectedIds(result.assets.map((asset) => asset.id));
       setActiveStep('library');
       setNotice(importSummary(result.imported, result.skipped, result.errors.length, 'file'));
+      if (result.errors.length) progress(result.errors[0].message);
     });
   }
 
-  async function importFolders(): Promise<void> {
-    const paths = await runTask('Choose photo folders', () => apiClient.choosePhotoFolders());
-    if (!paths?.length) return;
+  async function chooseNewSource(): Promise<void> {
+    const sourcePath = await runTask('Choose current source', async (progress) => {
+      progress('Waiting for a photo folder selection.');
+      return apiClient.choosePhotoFolder();
+    });
+    if (!sourcePath) return;
 
-    await runTask('Import folders', async () => {
-      const roots = await apiClient.addSourceRoots(paths);
-      let scanned = 0;
-      let errors = 0;
-      for (const root of roots) {
-        const result = await apiClient.scanSourceRoot(root.id);
-        scanned += result.scanned;
-        errors += result.errors.length;
-      }
+    const root = await runTask('Switch current source', async (progress) => {
+      progress('Clearing the previous session library without deleting photo or sidecar files.');
+      const nextRoot = await apiClient.setSourceRoot(sourcePath);
+      setSourceRoots([nextRoot]);
+      setAssets([]);
+      setSelectedIds([]);
+      setLastSelectedIndex(undefined);
+      setQuery(defaultQuery);
+      progress(`Current source is now ${nextRoot.name}.`);
+      return nextRoot;
+    });
+    if (!root) return;
+
+    await runTask(`Scan ${root.name}`, async (progress) => {
+      progress('Discovering supported photos and reading embedded and sidecar metadata.');
+      const result = await apiClient.scanSourceRoot(root.id);
+      progress(`Found ${result.scanned} supported photo${result.scanned === 1 ? '' : 's'}.`);
       await reloadInitialState();
-      await refreshAssets(query);
+      await refreshAssets(defaultQuery);
       setActiveStep('library');
-      setNotice(`Registered ${roots.length} folder${roots.length === 1 ? '' : 's'} and scanned ${scanned} photo${scanned === 1 ? '' : 's'}${errors ? ` with ${errors} error${errors === 1 ? '' : 's'}` : ''}.`);
+      setNotice(
+        `Current source: ${root.name}. Scanned ${result.scanned} photo${result.scanned === 1 ? '' : 's'}${
+          result.errors.length ? ` with ${result.errors.length} error${result.errors.length === 1 ? '' : 's'}` : ''
+        }.`
+      );
     });
   }
 
@@ -239,7 +286,8 @@ export function App(): JSX.Element {
     const path = await runTask('Choose sidecar mirror', () => apiClient.chooseDirectory('Choose Sidecar Mirror Folder'));
     if (!path) return;
 
-    await runTask('Set sidecar mirror', async () => {
+    await runTask('Set sidecar mirror', async (progress) => {
+      progress('Validating that the sidecar folder is separate from the current source.');
       const next = await apiClient.updateSettings({ sidecarRoot: path });
       setSettings(next);
       await reloadInitialState();
@@ -249,31 +297,13 @@ export function App(): JSX.Element {
   }
 
   async function scan(root: SourceRoot): Promise<void> {
-    await runTask(`Scan ${root.name}`, async () => {
+    await runTask(`Rescan ${root.name}`, async (progress) => {
+      progress('Checking the current source for new or changed photos.');
       const result = await apiClient.scanSourceRoot(root.id);
+      progress(`Read ${result.scanned} supported photo${result.scanned === 1 ? '' : 's'}.`);
       await reloadInitialState();
       await refreshAssets(query);
       setNotice(`Scanned ${result.scanned} photo${result.scanned === 1 ? '' : 's'} from ${root.name}; ${result.errors.length} error${result.errors.length === 1 ? '' : 's'}.`);
-    });
-  }
-
-  async function scanAll(): Promise<void> {
-    if (sourceRoots.length === 0) {
-      setNotice('Add a folder before scanning.');
-      return;
-    }
-
-    await runTask('Scan folders', async () => {
-      let scanned = 0;
-      let errors = 0;
-      for (const root of sourceRoots) {
-        const result = await apiClient.scanSourceRoot(root.id);
-        scanned += result.scanned;
-        errors += result.errors.length;
-      }
-      await reloadInitialState();
-      await refreshAssets(query);
-      setNotice(`Scanned ${scanned} photo${scanned === 1 ? '' : 's'} across ${sourceRoots.length} folder${sourceRoots.length === 1 ? '' : 's'}; ${errors} error${errors === 1 ? '' : 's'}.`);
     });
   }
 
@@ -281,7 +311,8 @@ export function App(): JSX.Element {
     const path = await runTask('Choose map pack', () => apiClient.chooseMapPack());
     if (!path) return;
 
-    await runTask('Import map pack', async () => {
+    await runTask('Import map pack', async (progress) => {
+      progress('Inspecting the map pack header, tile type, bounds, and zoom levels.');
       const pack = await apiClient.importMapPack(path);
       await reloadInitialState();
       setNotice(`Imported ${pack.name}${pack.metadata?.maxZoom !== undefined ? `, zoom ${pack.metadata.minZoom}-${pack.metadata.maxZoom}` : ''}.`);
@@ -315,7 +346,8 @@ export function App(): JSX.Element {
   }
 
   async function saveMapPreferences(): Promise<void> {
-    await runTask('Save map setup', async () => {
+    await runTask('Save map setup', async (progress) => {
+      progress('Persisting map regions, detail, budget, output folder, and source.');
       const plan = await apiClient.saveMapDownloadPreferences(mapDraft);
       applyMapPlan(plan);
       setNotice('Map setup saved. Installed packs remain available offline.');
@@ -323,8 +355,13 @@ export function App(): JSX.Element {
   }
 
   async function downloadMapSelection(): Promise<void> {
-    await runTask('Download offline maps', async () => {
+    await runTask('Download offline maps', async (progress) => {
+      progress(
+        `Preparing ${mapDraft.regionIds.length} region${mapDraft.regionIds.length === 1 ? '' : 's'} at ${mapDraft.detailId} detail.`
+      );
+      progress('Downloading and extracting PMTiles. Elapsed time will continue here if the process is slow.');
       const result = await apiClient.downloadMapSelection(mapDraft);
+      progress('Validating downloaded packs and refreshing the offline map registry.');
       await reloadInitialState();
       const errorPart = result.errors.length
         ? `, ${result.errors.length} error${result.errors.length === 1 ? '' : 's'}`
@@ -353,9 +390,12 @@ export function App(): JSX.Element {
       return;
     }
 
-    await runTask('Save sidecar metadata', async () => {
+    await runTask('Save sidecar metadata', async (progress) => {
       const patch = buildMetadataPatch(form, dirtyFields);
       requireCoordinatePair(patch, form);
+      progress(
+        `Writing ${dirtyFields.size} changed field${dirtyFields.size === 1 ? '' : 's'} for ${selectedIds.length} selected photo${selectedIds.length === 1 ? '' : 's'}.`
+      );
       const result = await apiClient.saveMetadata(selectedIds, patch);
       setDirtyFields(new Set());
       await refreshAssets(query);
@@ -415,8 +455,10 @@ export function App(): JSX.Element {
     );
     if (!destination) return;
 
-    await runTask('Export for Immich', async () => {
+    await runTask('Export for Immich', async (progress) => {
+      progress('Creating the staging tree and attempting hardlinks before copying media.');
       const result = await apiClient.exportImmich(all ? 'all' : selectedIds, destination);
+      progress('Writing Immich-compatible filename.ext.xmp sidecars beside staged media.');
       setNotice(
         `Exported ${result.exportedAssets} asset${result.exportedAssets === 1 ? '' : 's'}, wrote ${result.sidecarsWritten} XMP sidecar${result.sidecarsWritten === 1 ? '' : 's'}, ${result.hardlinked} hardlink${result.hardlinked === 1 ? '' : 's'}, ${result.copied} copied, ${result.errors.length} error${result.errors.length === 1 ? '' : 's'}.`
       );
@@ -437,16 +479,71 @@ export function App(): JSX.Element {
     }
   }
 
-  async function runTask<T>(label: string, task: () => Promise<T>): Promise<T | undefined> {
-    setBusy(label);
+  async function runTask<T>(
+    label: string,
+    task: (progress: (message: string) => void) => Promise<T>
+  ): Promise<T | undefined> {
+    const taskId = crypto.randomUUID();
+    const startedAt = Date.now();
+    const running: RunningActivity = { id: taskId, label, startedAt };
+    const entry: ActivityEntry = {
+      id: taskId,
+      taskId,
+      label,
+      message: 'Started.',
+      status: 'running',
+      timestamp: startedAt
+    };
+    setRunningActivities((current) => [...current, running]);
+    setActivityEntries((current) => [...current, entry].slice(-250));
+
+    const progress = (message: string): void => {
+      setActivityEntries((current) =>
+        [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            taskId,
+            label: 'step',
+            message,
+            status: 'info' as const,
+            timestamp: Date.now()
+          }
+        ].slice(-250)
+      );
+    };
+
     try {
-      return await task();
+      const result = await task(progress);
+      const completedAt = Date.now();
+      setActivityEntries((current) =>
+        current.map((currentEntry) =>
+          currentEntry.id === taskId
+            ? { ...currentEntry, status: 'success', message: 'Completed.', completedAt }
+            : currentEntry
+        )
+      );
+      return result;
     } catch (error) {
-      setNotice(`${label}: ${formatError(error)}`);
+      const message = formatError(error);
+      const completedAt = Date.now();
+      setActivityEntries((current) =>
+        current.map((currentEntry) =>
+          currentEntry.id === taskId
+            ? { ...currentEntry, status: 'error', message, completedAt }
+            : currentEntry
+        )
+      );
+      setActivityCollapsed(false);
+      setNotice(`${label}: ${message}`);
       return undefined;
     } finally {
-      setBusy(undefined);
+      setRunningActivities((current) => current.filter((activity) => activity.id !== taskId));
     }
+  }
+
+  function clearCompletedActivity(): void {
+    setActivityEntries((current) => current.filter((entry) => entry.status === 'running'));
   }
 
   function updateQuery(patch: Partial<AssetQuery>): void {
@@ -535,7 +632,16 @@ export function App(): JSX.Element {
   }
 
   return (
-    <div className={`workflow-shell ${toolsOpen ? 'tools-open' : 'tools-closed'}`}>
+    <div
+      className={[
+        'workflow-shell',
+        activeStep === 'edit' ? 'editor-open' : '',
+        activeStep === 'edit' && mapOpen ? 'map-open' : '',
+        activityCollapsed ? 'activity-collapsed' : 'activity-open'
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
       <aside className="workflow-rail">
         <div className="rail-brand">
           <MapPinned size={24} />
@@ -549,8 +655,11 @@ export function App(): JSX.Element {
               <button
                 key={step.id}
                 className={activeStep === step.id ? 'active' : ''}
-                onClick={() => setActiveStep(step.id)}
-                title={step.label}
+                onClick={() => {
+                  setActiveStep(step.id);
+                  if (step.id !== 'edit') setMapOpen(false);
+                }}
+                title={workflowHelp(step.id)}
               >
                 <Icon size={20} />
                 <span>{step.label}</span>
@@ -568,9 +677,9 @@ export function App(): JSX.Element {
                 className={activeStep === step.id ? 'active' : ''}
                 onClick={() => {
                   setActiveStep(step.id);
-                  setToolsOpen(false);
+                  setMapOpen(false);
                 }}
-                title={step.label}
+                title={maintenanceHelp(step.id)}
               >
                 <Icon size={20} />
                 <span>{step.label}</span>
@@ -578,13 +687,23 @@ export function App(): JSX.Element {
             );
           })}
         </nav>
-        <button className={toolsOpen ? 'rail-tool active' : 'rail-tool'} onClick={() => setToolsOpen(!toolsOpen)} title="Tools">
-          <Settings size={20} />
-          <span>Tools</span>
+        <button
+          className={activityCollapsed ? 'rail-tool' : 'rail-tool active'}
+          onClick={() => setActivityCollapsed((current) => !current)}
+          title="Open the activity console to see every operation, progress step, error, and elapsed time"
+        >
+          <Terminal size={20} />
+          <span>Activity</span>
         </button>
       </aside>
 
-      <main className={activeStep === 'maps' ? 'maintenance-stage' : 'library-stage'}>
+      <main
+        className={
+          activeStep === 'maps' || activeStep === 'settings'
+            ? 'maintenance-stage'
+            : `library-stage area-${activeStep}`
+        }
+      >
         <header className={busy ? 'status-banner working' : 'status-banner'}>
           <div>
             <strong>
@@ -594,10 +713,10 @@ export function App(): JSX.Element {
             <span>{notice}</span>
           </div>
           <div className="health-pills">
-            <StatusPill ok={Boolean(health)} label={health ? `Bridge ${health.appVersion}` : 'Bridge'} />
-            <StatusPill ok label="Source unchanged" />
-            <StatusPill ok={Boolean(settings.sidecarRoot)} label="Sidecar mirror" />
-            <StatusPill ok={Boolean(tileServerUrl)} label="Tile server" />
+            <StatusPill ok={Boolean(health)} label={health ? `Bridge ${health.appVersion}` : 'Bridge'} title="The secure Electron connection to local files is available" />
+            <StatusPill ok label="Source unchanged" title="The app reads source photos but never writes metadata into them" />
+            <StatusPill ok={Boolean(settings.sidecarRoot)} label="Sidecar mirror" title="Editable metadata is stored separately in the configured XMP mirror" />
+            <StatusPill ok={Boolean(tileServerUrl)} label="Tile server" title="The local-only map tile service is ready for offline maps" />
           </div>
         </header>
 
@@ -617,48 +736,67 @@ export function App(): JSX.Element {
             onSetActiveMapPack={setActiveMapPack}
             onRemoveMapPack={removeMapPack}
           />
+        ) : activeStep === 'settings' ? (
+          <SettingsMaintenance
+            settings={settings}
+            health={health}
+            currentSource={currentSource}
+            busy={busy}
+            onChooseSidecarRoot={chooseSidecarRoot}
+          />
         ) : (
           <>
-        <section className="quick-actions">
-          <button className="primary" disabled={Boolean(busy)} onClick={importFiles}>
-            <Upload size={17} /> Add Photos
-          </button>
-          <button disabled={Boolean(busy)} onClick={importFolders}>
-            <FolderOpen size={17} /> Choose New Source
-          </button>
-          <button disabled={Boolean(busy) || sourceRoots.length === 0} onClick={scanAll}>
-            <RefreshCw size={17} /> Scan
-          </button>
-          <button disabled={Boolean(busy)} onClick={chooseSidecarRoot}>
-            <Settings size={17} /> Sidecar Mirror
-          </button>
-          <button onClick={() => setActiveStep('maps')}>
-            <Map size={17} /> Maps
-          </button>
-        </section>
-
         {activeStep === 'import' && (
-          <section className="workflow-card">
-            <div>
-              <h1>Import photos in place</h1>
-              <p>Files are registered and scanned from their current folders. Originals are not copied or edited.</p>
+          <section className="import-workspace">
+            <div className="import-heading">
+              <div>
+                <h1>Choose this session's photo source</h1>
+                <p>The source is cleared when the app closes. Photos stay in place and original files are never modified.</p>
+              </div>
+              <div className="button-row wrap">
+                <button
+                  className="primary"
+                  disabled={Boolean(busy)}
+                  onClick={chooseNewSource}
+                  title="Choose one folder as the current source; switching sources clears the old library view without deleting files"
+                >
+                  <FolderOpen size={17} /> {currentSource ? 'Choose Different Source' : 'Choose Source'}
+                </button>
+                <button
+                  disabled={Boolean(busy) || !currentSource}
+                  onClick={importFiles}
+                  title="Add selected photo files that are inside the current source folder"
+                >
+                  <Upload size={17} /> Add Specific Photos
+                </button>
+              </div>
             </div>
             <div className="setup-grid">
               <SetupItem
-                ok={sourceRoots.length > 0}
-                title={`${sourceRoots.length} source${sourceRoots.length === 1 ? '' : 's'}`}
-                detail={sourceRoots.length ? sourceRoots.map((root) => root.name).join(', ') : 'Import files or folders to begin.'}
+                ok={Boolean(currentSource)}
+                title={currentSource ? currentSource.name : 'No current source'}
+                detail={currentSource ? compactPath(currentSource.path) : 'Choose one photo folder to begin this session.'}
+                help="Only this source is active. Choosing another source replaces it in the session library."
               />
               <SetupItem
                 ok={Boolean(settings.sidecarRoot)}
                 title="Sidecar mirror"
                 detail={settings.sidecarRoot ? compactPath(settings.sidecarRoot) : 'Choose where editable XMP sidecars live.'}
+                help="Sidecar settings persist between sessions even though photo sources do not."
               />
               <SetupItem
                 ok={mapPacks.some((pack) => pack.kind === 'pmtiles')}
                 title="Offline maps"
                 detail={activeMapPack ? activeMapPack.name : 'Manual coordinates work without a map pack.'}
+                help="Offline map packs persist and are managed under Maintenance, Maps."
               />
+            </div>
+            <div className="import-session-note">
+              <Info size={17} />
+              <div>
+                <strong>Session-only library</strong>
+                <span>Closing the app forgets source paths and scanned thumbnails. Your source photos, mirrored sidecars, map packs, and settings remain on disk.</span>
+              </div>
             </div>
           </section>
         )}
@@ -670,29 +808,58 @@ export function App(): JSX.Element {
               <p>Creates a separate folder with media plus `filename.ext.xmp` sidecars beside staged files.</p>
             </div>
             <div className="button-row">
-              <button disabled={selectedIds.length === 0} onClick={() => exportImmich(false)}>
+              <button
+                disabled={selectedIds.length === 0}
+                onClick={() => exportImmich(false)}
+                title="Create an Immich-ready staging folder containing only selected photos and filename.ext.xmp sidecars"
+              >
                 <Archive size={17} /> Export Selected
               </button>
-              <button disabled={assets.length === 0} onClick={() => exportImmich(true)}>
+              <button
+                disabled={assets.length === 0}
+                onClick={() => exportImmich(true)}
+                title="Create an Immich-ready staging folder from every photo visible under the current filters"
+              >
                 <Archive size={17} /> Export All Filtered
               </button>
             </div>
           </section>
         )}
 
+        {activeStep !== 'import' && (
         <section className="browser-panel" tabIndex={0} onKeyDown={handleBrowserKeyDown}>
           <div className="browser-header">
             <div>
               <h1>{assets.length} Photos</h1>
               <span>{selectedIds.length} selected</span>
             </div>
-            <div className="view-toggle" aria-label="View">
-              <button className={browserView === 'thumbnail' ? 'active' : ''} onClick={() => setBrowserView('thumbnail')} title="Thumbnail view">
-                <Grid2X2 size={17} />
+            <div className="browser-header-actions">
+              <div
+                className={currentSource ? 'current-source-chip active' : 'current-source-chip'}
+                title={currentSource ? `Current source: ${currentSource.path}` : 'No source is active for this session'}
+              >
+                <FolderOpen size={15} />
+                <span>
+                  <small>Current source</small>
+                  <strong>{currentSource?.name ?? 'None'}</strong>
+                </span>
+              </div>
+              <button
+                disabled={Boolean(busy) || !currentSource}
+                onClick={() => currentSource && scan(currentSource)}
+                title="Rescan the current source for new or changed photos"
+                aria-label="Rescan current source"
+              >
+                <RefreshCw size={16} />
               </button>
-              <button className={browserView === 'detail' ? 'active' : ''} onClick={() => setBrowserView('detail')} title="Detail view">
-                <List size={17} />
-              </button>
+              <div className="view-toggle" aria-label="Photo browser view">
+                <button className={browserView === 'thumbnail' ? 'active' : ''} onClick={() => setBrowserView('thumbnail')} title="Show photos as large thumbnails">
+                  <Grid2X2 size={17} />
+                </button>
+                <button className={browserView === 'detail' ? 'active' : ''} onClick={() => setBrowserView('detail')} title="Show photos in a sortable metadata table">
+                  <List size={17} />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -702,18 +869,15 @@ export function App(): JSX.Element {
               <input
                 value={query.text ?? ''}
                 placeholder="Search filename, path, tags"
+                title="Search the current source by filename, relative path, or metadata tag"
                 onChange={(event) => updateQuery({ text: event.target.value || undefined })}
               />
             </label>
-            <select value={query.sourceRootId ?? ''} onChange={(event) => updateQuery({ sourceRootId: event.target.value || undefined })}>
-              <option value="">All sources</option>
-              {sourceRoots.map((root) => (
-                <option key={root.id} value={root.id}>
-                  {root.name}
-                </option>
-              ))}
-            </select>
-            <select value={query.filter ?? 'all'} onChange={(event) => updateQuery({ filter: event.target.value as AssetQuery['filter'] })}>
+            <select
+              value={query.filter ?? 'all'}
+              title="Filter photos by GPS, sidecar edit, or metadata conflict status"
+              onChange={(event) => updateQuery({ filter: event.target.value as AssetQuery['filter'] })}
+            >
               {filterOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -722,6 +886,7 @@ export function App(): JSX.Element {
             </select>
             <select
               value={query.sortBy ?? 'filename'}
+              title="Choose the metadata field used to order the current library"
               onChange={(event) => updateQuery({ sortBy: event.target.value as AssetSortBy })}
             >
               {sortOptions.map((option) => (
@@ -732,13 +897,14 @@ export function App(): JSX.Element {
             </select>
             <button
               onClick={() => updateQuery({ sortDirection: nextSortDirection(query.sortDirection) })}
+              title="Reverse the current sort order"
             >
               <SlidersHorizontal size={16} /> {(query.sortDirection ?? 'asc').toUpperCase()}
             </button>
           </div>
 
           <div className="filter-row">
-            <select value={query.rating ?? ''} onChange={(event) => updateQuery({ rating: event.target.value ? Number(event.target.value) : undefined })}>
+            <select title="Show only photos with a specific rating" value={query.rating ?? ''} onChange={(event) => updateQuery({ rating: event.target.value ? Number(event.target.value) : undefined })}>
               <option value="">Any rating</option>
               {[0, 1, 2, 3, 4, 5].map((rating) => (
                 <option key={rating} value={rating}>
@@ -746,7 +912,7 @@ export function App(): JSX.Element {
                 </option>
               ))}
             </select>
-            <select value={query.extension ?? ''} onChange={(event) => updateQuery({ extension: event.target.value || undefined })}>
+            <select title="Show only one photo file type" value={query.extension ?? ''} onChange={(event) => updateQuery({ extension: event.target.value || undefined })}>
               <option value="">Any type</option>
               {availableExtensions.map((extension) => (
                 <option key={extension} value={extension}>
@@ -754,7 +920,7 @@ export function App(): JSX.Element {
                 </option>
               ))}
             </select>
-            <select value={query.tag ?? ''} onChange={(event) => updateQuery({ tag: event.target.value || undefined })}>
+            <select title="Show only photos containing a selected metadata tag" value={query.tag ?? ''} onChange={(event) => updateQuery({ tag: event.target.value || undefined })}>
               <option value="">Any tag</option>
               {availableTags.map((tag) => (
                 <option key={tag} value={tag}>
@@ -762,10 +928,14 @@ export function App(): JSX.Element {
                 </option>
               ))}
             </select>
-            <button disabled={assets.length === 0} onClick={() => selectAllFiltered()}>
+            <button disabled={assets.length === 0} onClick={() => selectAllFiltered()} title="Select every photo currently visible after filters; Ctrl+A does the same">
               <Layers size={16} /> {allFilteredSelected ? 'Clear Selection' : 'Select All Filtered'}
             </button>
-            <button disabled={selectedIds.length === 0 || Boolean(busy)} onClick={removeSelectedFromLibrary}>
+            <button
+              disabled={selectedIds.length === 0 || Boolean(busy)}
+              onClick={removeSelectedFromLibrary}
+              title="Unregister selected photos from this session view without deleting source files or sidecars"
+            >
               <Trash2 size={16} /> Remove From Library
             </button>
           </div>
@@ -826,11 +996,12 @@ export function App(): JSX.Element {
             </div>
           )}
         </section>
+        )}
           </>
         )}
       </main>
 
-      {activeStep !== 'maps' && (
+      {activeStep === 'edit' && (
       <aside className="metadata-inspector">
         <section className="inspector-section">
           <div className="panel-title">
@@ -838,12 +1009,22 @@ export function App(): JSX.Element {
               <h2>{selectedIds.length > 1 ? 'Batch Metadata' : 'Metadata'}</h2>
               <span>{selectedIds.length ? `${selectedIds.length} selected` : 'Select photos to edit'}</span>
             </div>
-            <button disabled={!selectedAsset} onClick={revealSelected} title="Reveal selected photo">
-              <FolderOpen size={16} />
-            </button>
+            <div className="panel-title-actions">
+              <button
+                className={mapOpen ? 'active' : ''}
+                onClick={() => setMapOpen((current) => !current)}
+                title="Open the geotag map beside the metadata editor"
+                aria-label="Toggle geotag map"
+              >
+                <Map size={16} />
+              </button>
+              <button disabled={!selectedAsset} onClick={revealSelected} title="Reveal the first selected photo in File Explorer">
+                <FolderOpen size={16} />
+              </button>
+            </div>
           </div>
 
-          <label>
+          <label title="Write a caption or description into the mirrored XMP sidecar">
             <span>Description {fieldState('description', mixedFields, dirtyFields)}</span>
             <textarea
               value={form.description}
@@ -853,10 +1034,15 @@ export function App(): JSX.Element {
             />
           </label>
 
-          <label>
+          <label title="Set a zero-to-five-star XMP rating for every selected photo">
             <span>Rating {fieldState('rating', mixedFields, dirtyFields)}</span>
             <div className="rating-control">
-              <button className={form.rating === '' ? 'active' : ''} disabled={selectedIds.length === 0} onClick={() => setRating('')}>
+              <button
+                className={form.rating === '' ? 'active' : ''}
+                disabled={selectedIds.length === 0}
+                onClick={() => setRating('')}
+                title="Stage removal of the rating from selected photos"
+              >
                 Clear
               </button>
               {[1, 2, 3, 4, 5].map((rating) => (
@@ -865,6 +1051,7 @@ export function App(): JSX.Element {
                   className={form.rating === String(rating) ? 'active' : ''}
                   disabled={selectedIds.length === 0}
                   onClick={() => setRating(String(rating))}
+                  title={`Stage a ${rating}-star rating for selected photos`}
                 >
                   {rating}
                 </button>
@@ -873,7 +1060,7 @@ export function App(): JSX.Element {
           </label>
 
           <div className="date-fields">
-            <label>
+            <label title="Choose a local date and time with the Windows date picker">
               <span>Date/time picker {fieldState('dateTimeOriginal', mixedFields, dirtyFields)}</span>
               <input
                 type="datetime-local"
@@ -882,7 +1069,7 @@ export function App(): JSX.Element {
                 onChange={(event) => updateForm('dateTimeOriginal', event.target.value, 'dateTimeOriginal')}
               />
             </label>
-            <label>
+            <label title="Enter an exact XMP date, including timezone text when needed">
               <span>Freeform date/time</span>
               <input
                 value={form.dateTimeOriginal}
@@ -895,7 +1082,7 @@ export function App(): JSX.Element {
 
           <div className="coordinate-block">
             <div className="two-col">
-              <label>
+              <label title="GPS latitude from -90 to 90 degrees">
                 <span>Latitude {fieldState('latitude', mixedFields, dirtyFields)}</span>
                 <input
                   value={form.latitude}
@@ -904,7 +1091,7 @@ export function App(): JSX.Element {
                   onChange={(event) => updateForm('latitude', event.target.value, 'latitude')}
                 />
               </label>
-              <label>
+              <label title="GPS longitude from -180 to 180 degrees">
                 <span>Longitude {fieldState('longitude', mixedFields, dirtyFields)}</span>
                 <input
                   value={form.longitude}
@@ -919,15 +1106,16 @@ export function App(): JSX.Element {
                 value={form.coordinatePaste}
                 disabled={selectedIds.length === 0}
                 placeholder="Paste lat, lon"
+                title="Paste a coordinate pair such as 34.0522, -118.2437"
                 onChange={(event) => updateForm('coordinatePaste', event.target.value)}
               />
-              <button disabled={selectedIds.length === 0 || !form.coordinatePaste.trim()} onClick={pasteCoordinates}>
+              <button disabled={selectedIds.length === 0 || !form.coordinatePaste.trim()} onClick={pasteCoordinates} title="Parse the pasted coordinates and stage them for the next sidecar save">
                 <LocateFixed size={16} /> Use
               </button>
             </div>
           </div>
 
-          <label>
+          <label title="Add searchable XMP subject tags; batch editing changes tags only after this field is touched">
             <span>Tags {fieldState('tags', mixedFields, dirtyFields)}</span>
             <div className="tag-editor">
               <div className="tag-chips">
@@ -935,7 +1123,7 @@ export function App(): JSX.Element {
                   <span className="empty-tags">{mixedPlaceholder('tags', mixedFields, dirtyFields) || 'No tags'}</span>
                 ) : (
                   form.tags.map((tag) => (
-                    <button key={tag} disabled={selectedIds.length === 0} onClick={() => removeTag(tag)}>
+                    <button key={tag} disabled={selectedIds.length === 0} onClick={() => removeTag(tag)} title={`Remove the "${tag}" tag from the staged metadata`}>
                       {tag}
                       <X size={13} />
                     </button>
@@ -949,6 +1137,7 @@ export function App(): JSX.Element {
                   value={tagDraft}
                   disabled={selectedIds.length === 0}
                   placeholder="Add tag"
+                  title="Type a tag, choose an existing suggestion, and press Enter"
                   onChange={(event) => setTagDraft(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {
@@ -957,7 +1146,7 @@ export function App(): JSX.Element {
                     }
                   }}
                 />
-                <button disabled={selectedIds.length === 0 || !tagDraft.trim()} onClick={addTag}>
+                <button disabled={selectedIds.length === 0 || !tagDraft.trim()} onClick={addTag} title="Add this tag to the staged metadata">
                   Add
                 </button>
               </div>
@@ -970,10 +1159,10 @@ export function App(): JSX.Element {
           </label>
 
           <div className="button-row">
-            <button disabled={!selectedCanSave || !settings.sidecarRoot} onClick={saveMetadata}>
+            <button disabled={!selectedCanSave || !settings.sidecarRoot} onClick={saveMetadata} title="Write only the changed fields into mirrored XMP sidecars; source photos stay untouched">
               <Save size={16} /> Save Sidecar
             </button>
-            <button disabled={selectedIds.length === 0 || !selectedHasDirtySidecars} onClick={revert}>
+            <button disabled={selectedIds.length === 0 || !selectedHasDirtySidecars} onClick={revert} title="Delete the app's mirrored sidecar edits for the selection and fall back to adjacent or embedded metadata">
               <RotateCcw size={16} /> Revert
             </button>
           </div>
@@ -981,7 +1170,7 @@ export function App(): JSX.Element {
           {!settings.sidecarRoot && (
             <div className="soft-warning">
               <Info size={16} />
-              <span>Choose a sidecar mirror before saving edits.</span>
+              <span>Choose a sidecar mirror under Maintenance, Settings before saving edits.</span>
             </div>
           )}
 
@@ -999,7 +1188,7 @@ export function App(): JSX.Element {
       </aside>
       )}
 
-      {activeStep !== 'maps' && toolsOpen && (
+      {activeStep === 'edit' && mapOpen && (
         <aside className="tools-drawer">
           <section className="inspector-section">
             <div className="panel-title">
@@ -1007,7 +1196,7 @@ export function App(): JSX.Element {
                 <h2>Geotag Map</h2>
                 <span>{activeMapPack ? activeMapPack.name : 'Manual coordinates available'}</span>
               </div>
-              <button onClick={() => setToolsOpen(false)} title="Close tools">
+              <button onClick={() => setMapOpen(false)} title="Close the geotag map">
                 <X size={16} />
               </button>
             </div>
@@ -1021,14 +1210,18 @@ export function App(): JSX.Element {
             )}
 
             <div className="button-row wrap">
-              <button onClick={() => setActiveStep('maps')}>
+              <button onClick={() => setActiveStep('maps')} title="Open map maintenance to download, import, activate, or remove offline packs">
                 <Map size={16} /> Manage Maps
               </button>
             </div>
 
             <label>
               Active map pack
-              <select value={settings.activeMapPackId ?? ''} onChange={(event) => setActiveMapPack(event.target.value)}>
+              <select
+                value={settings.activeMapPackId ?? ''}
+                title="Choose which installed PMTiles pack appears in the geotag editor"
+                onChange={(event) => setActiveMapPack(event.target.value)}
+              >
                 <option value="">No map pack</option>
                 {mapPacks
                   .filter((pack) => pack.kind === 'pmtiles')
@@ -1056,37 +1249,16 @@ export function App(): JSX.Element {
               onApplyLocation={applyLocation}
             />
           </section>
-
-          <section className="inspector-section">
-            <div className="panel-title">
-              <div>
-                <h2>Sidecar & Export</h2>
-                <span>{settings.sidecarRoot ? compactPath(settings.sidecarRoot) : 'Mirror not chosen'}</span>
-              </div>
-              <Archive size={17} />
-            </div>
-            <div className="button-row wrap">
-              <button onClick={chooseSidecarRoot}>
-                <Settings size={16} /> Sidecar Mirror
-              </button>
-              <button disabled={selectedIds.length === 0} onClick={() => exportImmich(false)}>
-                <Archive size={16} /> Export Selected
-              </button>
-              <button disabled={assets.length === 0} onClick={() => exportImmich(true)}>
-                <Archive size={16} /> Export All
-              </button>
-            </div>
-            <dl className="health-list">
-              <dt>User data</dt>
-              <dd>{health ? compactPath(health.userDataPath) : '-'}</dd>
-              <dt>Capabilities</dt>
-              <dd>{health ? `${health.capabilities.length} IPC actions` : '-'}</dd>
-              <dt>Source safety</dt>
-              <dd>Original media folders are read-only to this app.</dd>
-            </dl>
-          </section>
         </aside>
       )}
+
+      <ActivityConsole
+        entries={activityEntries}
+        running={runningActivities}
+        collapsed={activityCollapsed}
+        onToggle={() => setActivityCollapsed((current) => !current)}
+        onClear={clearCompletedActivity}
+      />
     </div>
   );
 }
@@ -1102,18 +1274,117 @@ function BridgeUnavailable(): JSX.Element {
   );
 }
 
-function StatusPill({ ok, label }: { ok: boolean; label: string }): JSX.Element {
+function SettingsMaintenance({
+  settings,
+  health,
+  currentSource,
+  busy,
+  onChooseSidecarRoot
+}: {
+  settings: AppSettings;
+  health?: HealthStatus;
+  currentSource?: SourceRoot;
+  busy?: string;
+  onChooseSidecarRoot(): void;
+}): JSX.Element {
   return (
-    <span className={ok ? 'status-pill ok' : 'status-pill'}>
+    <section className="settings-maintenance">
+      <div className="maintenance-header">
+        <div>
+          <h1>Settings & Diagnostics</h1>
+          <span>Maintenance / persistent storage, session behavior, desktop health</span>
+        </div>
+      </div>
+
+      <div className="settings-grid">
+        <section className="maintenance-panel">
+          <div className="panel-title">
+            <div>
+              <h2>Sidecar Library</h2>
+              <span>Persistent mirrored XMP storage</span>
+            </div>
+            <Save size={17} />
+          </div>
+          <p className="panel-copy">
+            Metadata edits are written here in a mirrored folder tree. Changing this folder never writes into your photo source.
+          </p>
+          <label title="The separate folder where this app writes editable XMP sidecars">
+            Current sidecar mirror
+            <input value={settings.sidecarRoot ?? ''} readOnly />
+          </label>
+          <div className="button-row">
+            <button
+              className="primary"
+              disabled={Boolean(busy)}
+              onClick={onChooseSidecarRoot}
+              title="Choose a separate folder for mirrored XMP sidecars; it cannot be inside the current photo source"
+            >
+              <FolderOpen size={16} /> Choose Sidecar Folder
+            </button>
+          </div>
+        </section>
+
+        <section className="maintenance-panel">
+          <div className="panel-title">
+            <div>
+              <h2>Photo Session</h2>
+              <span>One current source, forgotten at close</span>
+            </div>
+            <Image size={17} />
+          </div>
+          <p className="panel-copy">
+            Source paths and scanned assets are session-only. Choose or switch sources under Import; closing the app clears the source registry.
+          </p>
+          <dl className="health-list">
+            <dt>Current source</dt>
+            <dd title={currentSource?.path}>{currentSource?.name ?? 'None selected'}</dd>
+            <dt>On switch</dt>
+            <dd>Clear the old library view, then scan the new source.</dd>
+            <dt>On close</dt>
+            <dd>Forget source paths and cached photo records.</dd>
+            <dt>Preserved</dt>
+            <dd>Photos, sidecars, map packs, and app settings.</dd>
+          </dl>
+        </section>
+
+        <section className="maintenance-panel">
+          <div className="panel-title">
+            <div>
+              <h2>Desktop Health</h2>
+              <span>Local services and secure bridge</span>
+            </div>
+            <CheckCircle2 size={17} />
+          </div>
+          <dl className="health-list">
+            <dt>App version</dt>
+            <dd>{health?.appVersion ?? 'Checking...'}</dd>
+            <dt>User data</dt>
+            <dd title={health?.userDataPath}>{health ? compactPath(health.userDataPath) : '-'}</dd>
+            <dt>Bridge</dt>
+            <dd>{health ? `${health.capabilities.length} IPC actions available` : 'Not connected'}</dd>
+            <dt>Tile server</dt>
+            <dd>{health?.tileServerRunning ? health.tileServerUrl : 'Not running'}</dd>
+            <dt>Source safety</dt>
+            <dd>Original media folders are read-only to this app.</dd>
+          </dl>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function StatusPill({ ok, label, title }: { ok: boolean; label: string; title: string }): JSX.Element {
+  return (
+    <span className={ok ? 'status-pill ok' : 'status-pill'} title={title}>
       <CheckCircle2 size={14} />
       {label}
     </span>
   );
 }
 
-function SetupItem({ ok, title, detail }: { ok: boolean; title: string; detail: string }): JSX.Element {
+function SetupItem({ ok, title, detail, help }: { ok: boolean; title: string; detail: string; help?: string }): JSX.Element {
   return (
-    <div className={ok ? 'setup-item ok' : 'setup-item'}>
+    <div className={ok ? 'setup-item ok' : 'setup-item'} title={help ?? detail}>
       <CheckCircle2 size={17} />
       <div>
         <strong>{title}</strong>
@@ -1151,7 +1422,24 @@ function workflowTitle(step: AppArea): string {
     library: 'Library',
     edit: 'Metadata editor',
     export: 'Immich export',
-    maps: 'Maps maintenance'
+    maps: 'Maps maintenance',
+    settings: 'Settings and diagnostics'
+  }[step];
+}
+
+function workflowHelp(step: WorkflowStep): string {
+  return {
+    import: 'Choose or replace the one photo source used for this session',
+    library: 'Browse, filter, sort, select, rescan, or unregister photos from the current source',
+    edit: 'Edit metadata for one or many selected photos and save mirrored XMP sidecars',
+    export: 'Build an Immich-ready staging folder from selected or filtered photos'
+  }[step];
+}
+
+function maintenanceHelp(step: MaintenanceStep): string {
+  return {
+    maps: 'Download, import, activate, and remove offline map packs',
+    settings: 'Configure the sidecar library and inspect desktop health and session behavior'
   }[step];
 }
 

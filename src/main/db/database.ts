@@ -288,6 +288,32 @@ export class DatabaseService {
     return existing.length;
   }
 
+  async clearPhotoSession(): Promise<void> {
+    this.run('DELETE FROM edit_history');
+    this.run('DELETE FROM assets');
+    this.run('DELETE FROM source_roots');
+    await this.save();
+  }
+
+  async replacePhotoSessionSource(sourceRoot: SourceRoot): Promise<void> {
+    const db = this.requireDb();
+    db.exec('BEGIN');
+    try {
+      this.run('DELETE FROM edit_history');
+      this.run('DELETE FROM assets');
+      this.run('DELETE FROM source_roots');
+      this.run(
+        'INSERT INTO source_roots (id, path, name, createdAt, lastScanAt) VALUES (?, ?, ?, ?, ?)',
+        [sourceRoot.id, sourceRoot.path, sourceRoot.name, sourceRoot.createdAt, sourceRoot.lastScanAt]
+      );
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    await this.save();
+  }
+
   listAssets(options: {
     text?: string;
     sourceRootId?: string;
