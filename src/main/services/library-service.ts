@@ -1,4 +1,7 @@
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import { shell } from 'electron';
@@ -16,15 +19,31 @@ import {
 import { removeXmpSidecar, writeXmpSidecar } from '../metadata/xmp';
 import { isSupportedImagePath } from '../../shared/media';
 import {
+  defaultMapDownloadPreferences,
+  estimateMapDownloadBytes,
+  getMapDetail,
+  getMapRegion,
+  mapDetailPresets,
+  mapRegionPresets,
+  normalizeMapDownloadPreferences
+} from '../../shared/mapCatalog';
+import {
   AppSettings,
   ExportResult,
   ImportFilesResult,
   LocalPlace,
+  MapDownloadJob,
+  MapDownloadPlan,
+  MapDownloadPreferences,
+  MapDownloadRequest,
+  MapDownloadResult,
   MapPack,
   MapPackMetadata,
   MetadataFields,
   MetadataPatch,
   PhotoAsset,
+  RemoveAssetsResult,
+  RemoveMapPackResult,
   SaveMetadataResult,
   ScanResult,
   SourceRoot
@@ -33,7 +52,8 @@ import {
 export class LibraryService {
   constructor(
     private readonly db: DatabaseService,
-    private readonly exiftool: ExifToolService
+    private readonly exiftool: ExifToolService,
+    private readonly projectRoot = process.cwd()
   ) {}
 
   async updateSettings(settings: Partial<AppSettings>): Promise<AppSettings> {
@@ -156,6 +176,10 @@ export class LibraryService {
     return this.db.listAssets(options);
   }
 
+  async removeAssetsFromLibrary(assetIds: string[]): Promise<RemoveAssetsResult> {
+    return { removed: await this.db.deleteAssetsByIds(assetIds) };
+  }
+
   async saveMetadata(assetIds: string[], patch: MetadataPatch): Promise<SaveMetadataResult> {
     const settings = this.db.getSettings();
     if (!settings.sidecarRoot) {
@@ -247,6 +271,153 @@ export class LibraryService {
       await this.db.updateSettings({ activeMapPackId: mapPack.id });
     }
     return mapPack;
+  }
+
+  getMapDownloadPlan(): MapDownloadPlan {
+    const preferences = normalizeMapDownloadPreferences(
+      this.db.getSettings().mapDownloadPreferences ?? defaultMapDownloadPreferences()
+    );
+    const estimatedBytes = estimateMapDownloadBytes(preferences.regionIds, preferences.detailId);
+    return {
+      preferences,
+      regions: mapRegionPresets,
+      details: mapDetailPresets,
+      estimatedBytes,
+      budgetBytes: preferences.budgetBytes,
+      overBudget: estimatedBytes > preferences.budgetBytes,
+      installedPacks: this.db.listMapPacks().filter((pack) => pack.kind === 'pmtiles'),
+      jobs: this.db.listMapDownloadJobs(),
+      defaultOutputDirectory: getDefaultMapsDir()
+    };
+  }
+
+  async saveMapDownloadPreferences(preferences: MapDownloadPreferences): Promise<MapDownloadPlan> {
+    const normalized = normalizeMapDownloadPreferences(preferences);
+    normalized.outputDirectory = normalized.outputDirectory ? path.resolve(normalized.outputDirectory) : undefined;
+    await this.db.updateSettings({ mapDownloadPreferences: normalized });
+    return this.getMapDownloadPlan();
+  }
+
+  async downloadMapSelection(request: MapDownloadRequest): Promise<MapDownloadResult> {
+    const preferences = normalizeMapDownloadPreferences(request);
+    const detail = getMapDetail(preferences.detailId);
+    if (!detail) throw new Error('Choose a map detail level.');
+
+    const estimatedBytes = estimateMapDownloadBytes(preferences.regionIds, preferences.detailId);
+    const budgetBytes = request.budgetBytes ?? preferences.budgetBytes;
+    if (estimatedBytes > budgetBytes) {
+      throw new Error(`Selected maps are estimated above the active budget. Raise the budget or choose fewer regions.`);
+    }
+
+    const outputDirectory = path.resolve(preferences.outputDirectory || getDefaultMapsDir());
+    await fs.mkdir(outputDirectory, { recursive: true });
+    await this.saveMapDownloadPreferences({ ...preferences, outputDirectory, budgetBytes });
+
+    const job: MapDownloadJob = {
+      id: crypto.randomUUID(),
+      regionIds: preferences.regionIds,
+      detailId: preferences.detailId,
+      maxZoom: detail.maxZoom,
+      outputDirectory,
+      sourceUrl: preferences.sourceUrl,
+      estimatedBytes,
+      outputPaths: preferences.regionIds.map((regionId) =>
+        path.join(outputDirectory, `${slugFileName(getMapRegion(regionId)?.label ?? regionId)}_z${detail.maxZoom}.pmtiles`)
+      ),
+      status: 'running',
+      createdAt: new Date().toISOString()
+    };
+    await this.db.upsertMapDownloadJob(job);
+
+    const scriptPath = findMapScript(this.projectRoot);
+    const mapPacks: MapPack[] = [];
+    const errors: MapDownloadResult['errors'] = [];
+
+    for (const regionId of preferences.regionIds) {
+      const region = getMapRegion(regionId);
+      if (!region) {
+        errors.push({ regionId, message: 'Unknown region preset.' });
+        continue;
+      }
+
+      const outputPath = path.join(outputDirectory, `${slugFileName(region.label)}_z${detail.maxZoom}.pmtiles`);
+      const args = [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        scriptPath,
+        '-Mode',
+        region.bbox ? 'Custom' : 'Starter',
+        '-MaxZoom',
+        String(detail.maxZoom),
+        '-Output',
+        outputPath
+      ];
+      if (region.bbox) args.push('-Bbox', region.bbox.join(','));
+      if (preferences.sourceUrl) args.push('-SourceUrl', preferences.sourceUrl);
+
+      try {
+        await runPowerShell(args, this.projectRoot);
+        mapPacks.push(await this.importMapPack(outputPath));
+      } catch (error) {
+        errors.push({ regionId, message: String((error as Error).message ?? error) });
+      }
+    }
+
+    const completedJob: MapDownloadJob = {
+      ...job,
+      status: errors.length === 0 ? 'completed' : 'failed',
+      message:
+        errors.length === 0
+          ? `Downloaded and registered ${mapPacks.length} map pack${mapPacks.length === 1 ? '' : 's'}.`
+          : `Downloaded ${mapPacks.length} map pack${mapPacks.length === 1 ? '' : 's'} with ${errors.length} error${errors.length === 1 ? '' : 's'}.`,
+      completedAt: new Date().toISOString()
+    };
+    await this.db.upsertMapDownloadJob(completedJob);
+
+    return { job: completedJob, mapPacks, errors };
+  }
+
+  async removeMapPack(id: string, deleteFile = false): Promise<RemoveMapPackResult> {
+    const mapPack = this.db.getMapPack(id);
+    if (!mapPack) {
+      return {
+        removed: false,
+        deletedFile: false,
+        settings: this.db.getSettings(),
+        mapPacks: this.db.listMapPacks()
+      };
+    }
+
+    const defaultMapsDir = getDefaultMapsDir();
+    if (deleteFile && !isSameOrChildPath(defaultMapsDir, mapPack.path)) {
+      throw new Error('Only map files in the app maps folder can be deleted from here. Unregister imported files instead.');
+    }
+
+    await this.db.removeMapPack(id);
+    const settings = this.db.getSettings();
+    let nextSettings = settings;
+    if (settings.activeMapPackId === id) {
+      nextSettings = await this.db.updateSettings({ activeMapPackId: undefined });
+    }
+
+    let deletedFile = false;
+    if (deleteFile) {
+      try {
+        await fs.unlink(mapPack.path);
+        deletedFile = true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+
+    return {
+      removed: true,
+      deletedFile,
+      settings: nextSettings,
+      mapPacks: this.db.listMapPacks()
+    };
   }
 
   listMapPacks(): MapPack[] {
@@ -508,4 +679,52 @@ function isSameOrChildPath(parent: string, child: string): boolean {
   const parentPath = normalizeFsPath(parent);
   const childPath = normalizeFsPath(child);
   return childPath === parentPath || childPath.startsWith(`${parentPath}${path.sep}`);
+}
+
+function getDefaultMapsDir(): string {
+  const documents = path.join(os.homedir(), 'Documents');
+  return path.join(documents, 'Photo Metadata Manager', 'Maps');
+}
+
+function findMapScript(projectRoot: string): string {
+  const candidates = [
+    path.join(projectRoot, 'scripts', 'maps.ps1'),
+    path.join(process.cwd(), 'scripts', 'maps.ps1')
+  ];
+  for (const candidate of candidates) {
+    if (fsSync.existsSync(candidate)) return candidate;
+  }
+  return candidates[0];
+}
+
+function slugFileName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'map';
+}
+
+async function runPowerShell(args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('powershell', args, {
+      cwd,
+      windowsHide: true
+    });
+    let output = '';
+    child.stdout.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(output);
+        return;
+      }
+      reject(new Error(output.trim() || `PowerShell exited with code ${code ?? 'unknown'}.`));
+    });
+  });
 }

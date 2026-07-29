@@ -114,7 +114,7 @@ p {
   background: #172422;
   color: #eef7f3;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto;
   padding: 14px 10px;
 }
 
@@ -131,6 +131,22 @@ p {
   display: grid;
   align-content: start;
   gap: 8px;
+}
+
+.rail-group {
+  margin-bottom: 18px;
+}
+
+.rail-group small {
+  color: #7f9991;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.maintenance-group {
+  align-self: start;
 }
 
 .workflow-rail button {
@@ -157,6 +173,7 @@ p {
 }
 
 .library-stage,
+.maintenance-stage,
 .metadata-inspector,
 .tools-drawer {
   min-width: 0;
@@ -167,6 +184,15 @@ p {
 .library-stage {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 14px;
+}
+
+.maintenance-stage {
+  grid-column: 2 / -1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   padding: 14px;
 }
@@ -190,6 +216,21 @@ p {
   padding: 10px 12px;
 }
 
+.status-banner.working {
+  border-color: #d6b75d;
+  background: #fff9e8;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .status-banner > div:first-child {
   min-width: 0;
   display: grid;
@@ -197,6 +238,9 @@ p {
 }
 
 .status-banner strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-size: 14px;
 }
 
@@ -364,7 +408,7 @@ p {
 }
 
 .filter-row {
-  grid-template-columns: minmax(110px, 0.5fr) minmax(110px, 0.5fr) minmax(130px, 0.7fr) auto;
+  grid-template-columns: minmax(110px, 0.5fr) minmax(110px, 0.5fr) minmax(130px, 0.7fr) auto auto;
 }
 
 .searchbox,
@@ -442,6 +486,26 @@ p {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.file-thumb {
+  gap: 6px;
+  color: #38423d;
+  background: #e8eee9;
+}
+
+.file-thumb.raw {
+  background: #e7eff6;
+  color: #31536f;
+}
+
+.file-thumb.standard {
+  background: #f0ede4;
+  color: #675d42;
+}
+
+.file-thumb strong {
+  font-size: 12px;
 }
 
 .badge,
@@ -536,6 +600,244 @@ p {
   border: 1px dashed #bfc7c0;
   border-radius: 8px;
   color: #58615b;
+}
+
+.empty-library.compact {
+  min-height: 126px;
+  padding: 14px;
+  text-align: center;
+}
+
+.maps-maintenance {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+.maintenance-header,
+.maintenance-panel {
+  border: 1px solid #d6ddd6;
+  border-radius: 8px;
+  background: #fffefa;
+}
+
+.maintenance-header {
+  min-height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+}
+
+.maintenance-header h1 {
+  font-size: 22px;
+}
+
+.maintenance-header span,
+.region-item small,
+.detail-options small,
+.installed-map span,
+.installed-map small,
+.job-item span,
+.job-item small,
+.budget-summary span {
+  color: #6a716b;
+  font-size: 12px;
+}
+
+.maintenance-grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1fr) minmax(330px, 1.1fr);
+  grid-template-rows: minmax(0, 1fr) 230px;
+  gap: 10px;
+}
+
+.maintenance-panel {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 12px;
+}
+
+.region-panel {
+  grid-row: 1 / -1;
+}
+
+.map-plan-panel {
+  grid-row: 1 / -1;
+}
+
+.jobs-panel {
+  min-height: 0;
+}
+
+.region-list,
+.installed-map-list,
+.job-list {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding-right: 2px;
+}
+
+.region-item {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #d6ddd6;
+  border-radius: 8px;
+  background: #f7f8f4;
+  padding: 8px;
+}
+
+.region-item.selected {
+  border-color: #9ac8bd;
+  background: #edf8f5;
+}
+
+.region-item input {
+  width: 16px;
+  min-height: 16px;
+}
+
+.region-item span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.region-item strong,
+.region-item small,
+.installed-map strong,
+.installed-map span,
+.installed-map small,
+.job-item strong,
+.job-item span,
+.job-item small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.detail-options button {
+  min-height: 58px;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.detail-options button.active {
+  background: #23645d;
+  border-color: #23645d;
+  color: white;
+}
+
+.detail-options button.active small {
+  color: #d9eee8;
+}
+
+.budget-row,
+.path-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.budget-row span {
+  color: #555e58;
+  font-size: 12px;
+}
+
+.budget-meter {
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e4e9e3;
+}
+
+.budget-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #23645d;
+}
+
+.budget-meter.over span {
+  background: #8f3052;
+}
+
+.budget-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.map-plan-panel .soft-warning {
+  display: block;
+}
+
+.installed-map,
+.job-item {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d6ddd6;
+  border-radius: 8px;
+  background: #f7f8f4;
+  padding: 9px;
+}
+
+.installed-map {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.installed-map.active {
+  border-color: #9ac8bd;
+  background: #edf8f5;
+}
+
+.installed-map > div:first-child,
+.job-item {
+  min-width: 0;
+}
+
+.installed-map-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.installed-map-actions button {
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.job-item.completed {
+  border-color: #9ac8bd;
+}
+
+.job-item.failed {
+  border-color: #e8b6c8;
+  background: #fff0f5;
 }
 
 .metadata-inspector,
@@ -874,10 +1176,30 @@ p {
   }
 
   .filter-row {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .workflow-card {
     grid-template-columns: 1fr;
+  }
+
+  .maintenance-stage {
+    grid-column: 2 / -1;
+  }
+
+  .maintenance-grid {
+    grid-template-columns: minmax(280px, 1fr) minmax(320px, 1fr);
+    grid-template-rows: auto auto;
+    overflow: auto;
+  }
+
+  .region-panel,
+  .map-plan-panel {
+    grid-row: auto;
+  }
+
+  .installed-map-panel,
+  .jobs-panel {
+    min-height: 260px;
   }
 }

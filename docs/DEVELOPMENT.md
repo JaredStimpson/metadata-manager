@@ -34,6 +34,7 @@ docs/
 - Renderer code calls Electron only through `src/renderer/src/apiClient.ts`; buttons do not call `window.photoMeta` directly.
 - `health:check` reports app version, user data path, sidecar root, tile server state, and IPC capabilities for startup diagnostics.
 - Main-process IPC validates imported map packs before storing them.
+- Map downloads are modeled as a Maintenance feature with persistent preferences and download jobs.
 - The default sidecar mirror is outside photo source folders.
 - External links are restricted to `http` and `https` protocols.
 - Original media files are never modified by metadata saves.
@@ -52,6 +53,22 @@ The Electron main process owns:
 The renderer talks to the main process through typed IPC exposed by the preload script.
 
 The preload bridge is exposed from `src/preload/index.ts`. `Doctor.cmd` checks both the preload source and built preload output so missing bridge bundles are visible.
+
+## UI Areas
+
+Workflow parent areas:
+
+- Import
+- Library
+- Edit
+- Export
+
+Maintenance parent areas:
+
+- Maps
+- Sidecar setup and diagnostics through the side tools
+
+Map setup controls belong in Maintenance -> Maps. The geotag panel can use an installed map pack, but it should not own downloading or cleanup.
 
 ## Renderer
 
@@ -76,7 +93,9 @@ Focused unit tests cover:
 
 - Desktop bridge capability shape.
 - Library query filters and sorting.
+- Library removal without deleting source files.
 - Batch metadata patch generation.
+- Map download catalog defaults and estimates.
 - PMTiles rejection behavior.
 - XMP generation.
 - GPS conversion.

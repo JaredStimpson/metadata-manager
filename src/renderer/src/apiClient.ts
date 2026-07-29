@@ -3,6 +3,10 @@ import {
   AssetQuery,
   HealthStatus,
   ImportFilesResult,
+  MapDownloadPreferences,
+  MapDownloadRequest,
+  MapDownloadResult,
+  MapDownloadPlan,
   MapPack,
   MetadataPatch,
   PhotoAsset,
@@ -43,11 +47,19 @@ export const apiClient = {
   updateSettings: (settings: Partial<AppSettings>) => call('Update settings', (api) => api.updateSettings(settings)),
   addSourceRoots: (paths: string[]) => call('Register source folders', (api) => api.addSourceRoots(paths)),
   addImportedFiles: (paths: string[]) => call('Register photo files', (api) => api.addImportedFiles(paths)),
+  removeAssetsFromLibrary: (assetIds: string[]) =>
+    call('Remove photos from library', (api) => api.removeAssetsFromLibrary(assetIds)),
   scanSourceRoot: (sourceRootId: string) => call('Scan source folder', (api) => api.scanSourceRoot(sourceRootId)),
   listAssets: (query?: AssetQuery) => call('List photos', (api) => api.listAssets(query)),
   saveMetadata: (assetIds: string[], patch: MetadataPatch) => call('Save metadata', (api) => api.saveMetadata(assetIds, patch)),
   revertSidecars: (assetIds: string[]) => call('Revert sidecars', (api) => api.revertSidecars(assetIds)),
   importMapPack: (path: string) => call('Import map pack', (api) => api.importMapPack(path)),
+  getMapDownloadPlan: () => call('Load map download plan', (api) => api.getMapDownloadPlan()),
+  saveMapDownloadPreferences: (preferences: MapDownloadPreferences) =>
+    call('Save map download preferences', (api) => api.saveMapDownloadPreferences(preferences)),
+  downloadMapSelection: (request: MapDownloadRequest) =>
+    call('Download map selection', (api) => api.downloadMapSelection(request)),
+  removeMapPack: (id: string, deleteFile?: boolean) => call('Remove map pack', (api) => api.removeMapPack(id, deleteFile)),
   listMapPacks: () => call('List map packs', (api) => api.listMapPacks()),
   searchPlaces: (query: string) => call('Search places', (api) => api.searchPlaces(query)),
   exportImmich: (assetIds: string[] | 'all', destination: string) =>
@@ -83,10 +95,13 @@ export type ApiClient = typeof apiClient;
 export type {
   HealthStatus,
   ImportFilesResult,
+  MapDownloadPlan,
+  MapDownloadPreferences,
+  MapDownloadRequest,
+  MapDownloadResult,
   MapPack,
   PhotoAsset,
   SaveMetadataResult,
   ScanResult,
   SourceRoot
 };
-

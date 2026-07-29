@@ -6,7 +6,14 @@ import { DatabaseService } from './db/database';
 import { ExifToolService } from './metadata/exiftool';
 import { LibraryService } from './services/library-service';
 import { TileServer } from './services/tile-server';
-import { AppSettings, AssetQuery, MetadataPatch, photoMetadataCapabilities } from '../shared/types';
+import {
+  AppSettings,
+  AssetQuery,
+  MapDownloadPreferences,
+  MapDownloadRequest,
+  MetadataPatch,
+  photoMetadataCapabilities
+} from '../shared/types';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -27,7 +34,7 @@ async function bootstrap(): Promise<void> {
     });
   }
   exiftool = new ExifToolService();
-  library = new LibraryService(database, exiftool);
+  library = new LibraryService(database, exiftool, process.cwd());
   tileServer = new TileServer(database);
   await tileServer.start();
 
@@ -151,11 +158,18 @@ function registerIpc(): void {
   ipcMain.handle('settings:update', (_event, settings: Partial<AppSettings>) => library.updateSettings(settings));
   ipcMain.handle('library:addSourceRoots', (_event, paths: string[]) => library.addSourceRoots(paths));
   ipcMain.handle('library:addImportedFiles', (_event, paths: string[]) => library.addImportedFiles(paths));
+  ipcMain.handle('library:removeAssets', (_event, assetIds: string[]) => library.removeAssetsFromLibrary(assetIds));
   ipcMain.handle('library:scan', (_event, sourceRootId: string) => library.scanSourceRoot(sourceRootId));
   ipcMain.handle('assets:list', (_event, query?: AssetQuery) => library.listAssets(query));
   ipcMain.handle('metadata:save', (_event, assetIds: string[], patch: MetadataPatch) => library.saveMetadata(assetIds, patch));
   ipcMain.handle('metadata:revert', (_event, assetIds: string[]) => library.revertSidecars(assetIds));
   ipcMain.handle('maps:import', (_event, filePath: string) => library.importMapPack(filePath));
+  ipcMain.handle('maps:downloadPlan', () => library.getMapDownloadPlan());
+  ipcMain.handle('maps:saveDownloadPreferences', (_event, preferences: MapDownloadPreferences) =>
+    library.saveMapDownloadPreferences(preferences)
+  );
+  ipcMain.handle('maps:downloadSelection', (_event, request: MapDownloadRequest) => library.downloadMapSelection(request));
+  ipcMain.handle('maps:remove', (_event, id: string, deleteFile?: boolean) => library.removeMapPack(id, deleteFile));
   ipcMain.handle('maps:list', () => library.listMapPacks());
   ipcMain.handle('places:search', (_event, query: string) => library.searchPlaces(query));
   ipcMain.handle('export:immich', (_event, assetIds: string[] | 'all', destination: string) =>

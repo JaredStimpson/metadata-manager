@@ -6,7 +6,7 @@
 2. Use the left rail in order: Import, Library, Edit, Export.
 3. In Import, choose individual photo files or whole folders.
 4. Keep the default sidecar mirror or choose another mirror folder.
-5. Open Tools for map setup, then import a `.pmtiles` offline map pack or keep using manual coordinates.
+5. Use Maintenance -> Maps for map downloads, installed packs, and active map selection.
 
 ## Source Folders
 
@@ -30,6 +30,13 @@ Saving writes only to the mirror sidecar folder. Original media files are not mo
 
 When multiple photos are selected, mixed values are marked. Only fields you change are written to the selected sidecars.
 
+Selection controls:
+
+- Ctrl-click toggles individual photos.
+- Shift-click selects a range from the last selected photo.
+- Ctrl+A selects all filtered photos when the browser has focus.
+- Remove From Library unregisters selected photos from the app without deleting files.
+
 ## Geotagging
 
 With an offline map pack installed:
@@ -40,6 +47,8 @@ With an offline map pack installed:
 4. The coordinates are saved to mirror sidecars.
 
 Without a map pack, use the manual latitude and longitude fields.
+
+Map downloading and installed-pack cleanup are not part of the photo workflow. Use Maintenance -> Maps for regions, depth/detail, budget, download output folder, active pack, unregister, and app-managed file deletion.
 
 ## Batch Editing
 

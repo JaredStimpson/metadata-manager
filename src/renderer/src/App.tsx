@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useState } from 'react';
 import {
   Archive,
+  Camera,
   CheckCircle2,
-  ExternalLink,
+  FileImage,
   FileText,
   FolderOpen,
   Grid2X2,
@@ -20,10 +21,12 @@ import {
   Settings,
   SlidersHorizontal,
   Tags,
+  Trash2,
   Upload,
   X
 } from 'lucide-react';
 import { MapPanel } from './components/MapPanel';
+import { MapMaintenancePanel } from './components/MapMaintenancePanel';
 import { apiClient, formatError, hasDesktopBridge } from './apiClient';
 import {
   buildMetadataPatch,
@@ -42,6 +45,8 @@ import {
   HealthStatus,
   InitialState,
   LocalPlace,
+  MapDownloadPlan,
+  MapDownloadPreferences,
   MapPack,
   PhotoAsset,
   SourceRoot,
@@ -49,6 +54,7 @@ import {
 } from '../../shared/types';
 
 type WorkflowStep = 'import' | 'library' | 'edit' | 'export';
+type AppArea = WorkflowStep | 'maps';
 type BrowserView = 'thumbnail' | 'detail';
 
 const defaultQuery: AssetQuery = {
@@ -63,6 +69,10 @@ const workflowSteps: Array<{ id: WorkflowStep; label: string; icon: typeof Uploa
   { id: 'library', label: 'Library', icon: Grid2X2 },
   { id: 'edit', label: 'Edit', icon: FileText },
   { id: 'export', label: 'Export', icon: Archive }
+];
+
+const maintenanceSteps: Array<{ id: AppArea; label: string; icon: typeof Upload }> = [
+  { id: 'maps', label: 'Maps', icon: Map }
 ];
 
 const sortOptions: Array<{ value: AssetSortBy; label: string }> = [
@@ -89,12 +99,19 @@ export function App(): JSX.Element {
   const [settings, setSettings] = useState<AppSettings>({});
   const [sourceRoots, setSourceRoots] = useState<SourceRoot[]>([]);
   const [mapPacks, setMapPacks] = useState<MapPack[]>([]);
+  const [mapPlan, setMapPlan] = useState<MapDownloadPlan>();
+  const [mapDraft, setMapDraft] = useState<MapDownloadPreferences>({
+    regionIds: ['world-overview'],
+    detailId: 'travel',
+    budgetBytes: 5 * 1024 * 1024 * 1024
+  });
   const [tileServerUrl, setTileServerUrl] = useState<string>();
   const [assets, setAssets] = useState<PhotoAsset[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number>();
   const [query, setQuery] = useState<AssetQuery>(defaultQuery);
   const [browserView, setBrowserView] = useState<BrowserView>('thumbnail');
-  const [activeStep, setActiveStep] = useState<WorkflowStep>('import');
+  const [activeStep, setActiveStep] = useState<AppArea>('import');
   const [toolsOpen, setToolsOpen] = useState(true);
   const [initialized, setInitialized] = useState(false);
   const [busy, setBusy] = useState<string>();
@@ -148,7 +165,9 @@ export function App(): JSX.Element {
     await runTask('Startup health check', async () => {
       const nextHealth = await apiClient.healthCheck();
       const state = await apiClient.getInitialState();
+      const nextPlan = await apiClient.getMapDownloadPlan();
       applyInitialState(state);
+      applyMapPlan(nextPlan);
       setHealth(nextHealth);
       await refreshAssets(defaultQuery);
       setInitialized(true);
@@ -163,9 +182,15 @@ export function App(): JSX.Element {
     setTileServerUrl(state.tileServerUrl);
   }
 
+  function applyMapPlan(plan: MapDownloadPlan): void {
+    setMapPlan(plan);
+    setMapDraft(plan.preferences);
+  }
+
   async function reloadInitialState(): Promise<void> {
     const state = await apiClient.getInitialState();
     applyInitialState(state);
+    applyMapPlan(await apiClient.getMapDownloadPlan());
     const nextHealth = await apiClient.healthCheck();
     setHealth(nextHealth);
   }
@@ -283,6 +308,41 @@ export function App(): JSX.Element {
     await runTask('Open map downloads', () => apiClient.openExternal('https://docs.protomaps.com/basemaps/downloads'));
   }
 
+  async function chooseMapOutputDirectory(): Promise<void> {
+    const path = await runTask('Choose map output folder', () => apiClient.chooseDirectory('Choose Offline Map Download Folder'));
+    if (!path) return;
+    setMapDraft((current) => ({ ...current, outputDirectory: path }));
+  }
+
+  async function saveMapPreferences(): Promise<void> {
+    await runTask('Save map setup', async () => {
+      const plan = await apiClient.saveMapDownloadPreferences(mapDraft);
+      applyMapPlan(plan);
+      setNotice('Map setup saved. Installed packs remain available offline.');
+    });
+  }
+
+  async function downloadMapSelection(): Promise<void> {
+    await runTask('Download offline maps', async () => {
+      const result = await apiClient.downloadMapSelection(mapDraft);
+      await reloadInitialState();
+      const errorPart = result.errors.length
+        ? `, ${result.errors.length} error${result.errors.length === 1 ? '' : 's'}`
+        : '';
+      setNotice(`Downloaded ${result.mapPacks.length} map pack${result.mapPacks.length === 1 ? '' : 's'}${errorPart}.`);
+    });
+  }
+
+  async function removeMapPack(id: string, deleteFile: boolean): Promise<void> {
+    await runTask(deleteFile ? 'Delete map pack file' : 'Unregister map pack', async () => {
+      const result = await apiClient.removeMapPack(id, deleteFile);
+      setSettings(result.settings);
+      setMapPacks(result.mapPacks);
+      applyMapPlan(await apiClient.getMapDownloadPlan());
+      setNotice(result.deletedFile ? 'Map pack removed and file deleted.' : 'Map pack removed from the app registry.');
+    });
+  }
+
   async function saveMetadata(): Promise<void> {
     if (selectedIds.length === 0) {
       setNotice('Select one or more photos before saving metadata.');
@@ -330,6 +390,17 @@ export function App(): JSX.Element {
       await apiClient.revertSidecars(selectedIds);
       await refreshAssets(query);
       setNotice(`Reverted mirror sidecar edits for ${selectedIds.length} photo${selectedIds.length === 1 ? '' : 's'}.`);
+    });
+  }
+
+  async function removeSelectedFromLibrary(): Promise<void> {
+    if (selectedIds.length === 0) return;
+    await runTask('Remove photos from library', async () => {
+      const result = await apiClient.removeAssetsFromLibrary(selectedIds);
+      setSelectedIds([]);
+      setLastSelectedIndex(undefined);
+      await refreshAssets(query);
+      setNotice(`Removed ${result.removed} photo${result.removed === 1 ? '' : 's'} from the library. Files were not deleted.`);
     });
   }
 
@@ -382,16 +453,35 @@ export function App(): JSX.Element {
     setQuery((current) => ({ ...current, ...patch, limit: current.limit ?? 500 }));
   }
 
-  function toggleSelection(asset: PhotoAsset, additive: boolean): void {
+  function selectAsset(asset: PhotoAsset, index: number, event: ReactMouseEvent): void {
+    const additive = event.ctrlKey || event.metaKey;
+    const range = event.shiftKey && lastSelectedIndex !== undefined;
     setSelectedIds((current) => {
+      if (range) {
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        const rangeIds = assets.slice(start, end + 1).map((rangeAsset) => rangeAsset.id);
+        return additive ? uniqueIds([...current, ...rangeIds]) : rangeIds;
+      }
       if (!additive) return [asset.id];
       return current.includes(asset.id) ? current.filter((id) => id !== asset.id) : [...current, asset.id];
     });
+    setLastSelectedIndex(index);
     if (activeStep === 'import') setActiveStep('edit');
   }
 
-  function selectAllFiltered(): void {
-    setSelectedIds(allFilteredSelected ? [] : assets.map((asset) => asset.id));
+  function selectAllFiltered(forceSelect = false): void {
+    setSelectedIds(!forceSelect && allFilteredSelected ? [] : assets.map((asset) => asset.id));
+    setLastSelectedIndex(assets.length ? 0 : undefined);
+  }
+
+  function handleBrowserKeyDown(event: ReactKeyboardEvent<HTMLElement>): void {
+    const target = event.target as HTMLElement;
+    if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target.tagName)) return;
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+      event.preventDefault();
+      selectAllFiltered(true);
+    }
   }
 
   function markDirty(...fields: MetadataFieldKey[]): void {
@@ -451,7 +541,8 @@ export function App(): JSX.Element {
           <MapPinned size={24} />
           <span>Photo Meta</span>
         </div>
-        <nav>
+        <nav className="rail-group">
+          <small>Workflow</small>
           {workflowSteps.map((step) => {
             const Icon = step.icon;
             return (
@@ -467,16 +558,39 @@ export function App(): JSX.Element {
             );
           })}
         </nav>
+        <nav className="rail-group maintenance-group">
+          <small>Maintenance</small>
+          {maintenanceSteps.map((step) => {
+            const Icon = step.icon;
+            return (
+              <button
+                key={step.id}
+                className={activeStep === step.id ? 'active' : ''}
+                onClick={() => {
+                  setActiveStep(step.id);
+                  setToolsOpen(false);
+                }}
+                title={step.label}
+              >
+                <Icon size={20} />
+                <span>{step.label}</span>
+              </button>
+            );
+          })}
+        </nav>
         <button className={toolsOpen ? 'rail-tool active' : 'rail-tool'} onClick={() => setToolsOpen(!toolsOpen)} title="Tools">
           <Settings size={20} />
           <span>Tools</span>
         </button>
       </aside>
 
-      <main className="library-stage">
-        <header className="status-banner">
+      <main className={activeStep === 'maps' ? 'maintenance-stage' : 'library-stage'}>
+        <header className={busy ? 'status-banner working' : 'status-banner'}>
           <div>
-            <strong>{busy ?? workflowTitle(activeStep)}</strong>
+            <strong>
+              {busy && <RefreshCw className="spin" size={15} />}
+              {busy ?? workflowTitle(activeStep)}
+            </strong>
             <span>{notice}</span>
           </div>
           <div className="health-pills">
@@ -487,21 +601,39 @@ export function App(): JSX.Element {
           </div>
         </header>
 
+        {activeStep === 'maps' ? (
+          <MapMaintenancePanel
+            plan={mapPlan}
+            draft={mapDraft}
+            settings={settings}
+            busy={busy}
+            onDraftChange={setMapDraft}
+            onChooseOutputDirectory={chooseMapOutputDirectory}
+            onSavePreferences={saveMapPreferences}
+            onDownloadSelection={downloadMapSelection}
+            onImportPack={importMapPack}
+            onOpenMapSetup={openMapSetup}
+            onOpenDocs={openMapGuide}
+            onSetActiveMapPack={setActiveMapPack}
+            onRemoveMapPack={removeMapPack}
+          />
+        ) : (
+          <>
         <section className="quick-actions">
-          <button className="primary" onClick={importFiles}>
-            <Upload size={17} /> Import Files
+          <button className="primary" disabled={Boolean(busy)} onClick={importFiles}>
+            <Upload size={17} /> Add Photos
           </button>
-          <button onClick={importFolders}>
-            <FolderOpen size={17} /> Import Folder
+          <button disabled={Boolean(busy)} onClick={importFolders}>
+            <FolderOpen size={17} /> Choose New Source
           </button>
-          <button disabled={sourceRoots.length === 0} onClick={scanAll}>
+          <button disabled={Boolean(busy) || sourceRoots.length === 0} onClick={scanAll}>
             <RefreshCw size={17} /> Scan
           </button>
-          <button onClick={chooseSidecarRoot}>
+          <button disabled={Boolean(busy)} onClick={chooseSidecarRoot}>
             <Settings size={17} /> Sidecar Mirror
           </button>
-          <button onClick={() => setToolsOpen(true)}>
-            <Map size={17} /> Map Setup
+          <button onClick={() => setActiveStep('maps')}>
+            <Map size={17} /> Maps
           </button>
         </section>
 
@@ -548,7 +680,7 @@ export function App(): JSX.Element {
           </section>
         )}
 
-        <section className="browser-panel">
+        <section className="browser-panel" tabIndex={0} onKeyDown={handleBrowserKeyDown}>
           <div className="browser-header">
             <div>
               <h1>{assets.length} Photos</h1>
@@ -630,8 +762,11 @@ export function App(): JSX.Element {
                 </option>
               ))}
             </select>
-            <button disabled={assets.length === 0} onClick={selectAllFiltered}>
+            <button disabled={assets.length === 0} onClick={() => selectAllFiltered()}>
               <Layers size={16} /> {allFilteredSelected ? 'Clear Selection' : 'Select All Filtered'}
+            </button>
+            <button disabled={selectedIds.length === 0 || Boolean(busy)} onClick={removeSelectedFromLibrary}>
+              <Trash2 size={16} /> Remove From Library
             </button>
           </div>
 
@@ -643,17 +778,14 @@ export function App(): JSX.Element {
             </div>
           ) : browserView === 'thumbnail' ? (
             <div className="photo-grid">
-              {assets.map((asset) => (
+              {assets.map((asset, index) => (
                 <button
                   key={asset.id}
                   className={selectedIds.includes(asset.id) ? 'asset-tile selected' : 'asset-tile'}
-                  onClick={(event) => toggleSelection(asset, event.ctrlKey || event.metaKey || event.shiftKey)}
+                  onClick={(event) => selectAsset(asset, index, event)}
                   title={asset.relativePath}
                 >
-                  <div className="thumb">
-                    {canPreview(asset.extension) ? <img src={fileUrl(asset.absolutePath)} alt="" /> : <Image size={30} />}
-                    <span className={`badge ${asset.sidecarStatus}`}>{badgeLabel(asset.sidecarStatus)}</span>
-                  </div>
+                  <AssetThumbnail asset={asset} />
                   <span>{asset.filename}</span>
                   <small>{assetSummary(asset)}</small>
                 </button>
@@ -673,11 +805,11 @@ export function App(): JSX.Element {
                   </tr>
                 </thead>
                 <tbody>
-                  {assets.map((asset) => (
+                  {assets.map((asset, index) => (
                     <tr
                       key={asset.id}
                       className={selectedIds.includes(asset.id) ? 'selected' : ''}
-                      onClick={(event) => toggleSelection(asset, event.ctrlKey || event.metaKey || event.shiftKey)}
+                      onClick={(event) => selectAsset(asset, index, event)}
                     >
                       <td title={asset.relativePath}>{asset.filename}</td>
                       <td>{asset.effective.dateTimeOriginal ?? '-'}</td>
@@ -694,8 +826,11 @@ export function App(): JSX.Element {
             </div>
           )}
         </section>
+          </>
+        )}
       </main>
 
+      {activeStep !== 'maps' && (
       <aside className="metadata-inspector">
         <section className="inspector-section">
           <div className="panel-title">
@@ -862,13 +997,14 @@ export function App(): JSX.Element {
           )}
         </section>
       </aside>
+      )}
 
-      {toolsOpen && (
+      {activeStep !== 'maps' && toolsOpen && (
         <aside className="tools-drawer">
           <section className="inspector-section">
             <div className="panel-title">
               <div>
-                <h2>Map Setup</h2>
+                <h2>Geotag Map</h2>
                 <span>{activeMapPack ? activeMapPack.name : 'Manual coordinates available'}</span>
               </div>
               <button onClick={() => setToolsOpen(false)} title="Close tools">
@@ -880,19 +1016,13 @@ export function App(): JSX.Element {
               <div className="no-map-panel">
                 <Map size={24} />
                 <strong>No offline map selected</strong>
-                <span>Import a vector `.pmtiles` basemap, or use manual latitude and longitude without a map.</span>
+                <span>Manual coordinates still work. Use Maps maintenance to install or change packs.</span>
               </div>
             )}
 
             <div className="button-row wrap">
-              <button onClick={openMapSetup}>
-                <Settings size={16} /> MapSetup.cmd
-              </button>
-              <button onClick={importMapPack}>
-                <Map size={16} /> Import Pack
-              </button>
-              <button onClick={openMapGuide}>
-                <ExternalLink size={16} /> Get Maps
+              <button onClick={() => setActiveStep('maps')}>
+                <Map size={16} /> Manage Maps
               </button>
             </div>
 
@@ -1015,12 +1145,13 @@ function requireCoordinatePair(patch: ReturnType<typeof buildMetadataPatch>, for
   if (hasLatitude !== hasLongitude) throw new Error('Latitude and longitude must be saved together.');
 }
 
-function workflowTitle(step: WorkflowStep): string {
+function workflowTitle(step: AppArea): string {
   return {
     import: 'Import',
     library: 'Library',
     edit: 'Metadata editor',
-    export: 'Immich export'
+    export: 'Immich export',
+    maps: 'Maps maintenance'
   }[step];
 }
 
@@ -1089,9 +1220,36 @@ function dateTimeLocalValue(value: string): string {
   return inputMatch?.[1] ?? '';
 }
 
+function AssetThumbnail({ asset }: { asset: PhotoAsset }): JSX.Element {
+  const [failed, setFailed] = useState(false);
+  if (canPreview(asset.extension) && !failed) {
+    return (
+      <div className="thumb">
+        <img src={fileUrl(asset.absolutePath)} alt="" onError={() => setFailed(true)} />
+        <span className={`badge ${asset.sidecarStatus}`}>{badgeLabel(asset.sidecarStatus)}</span>
+      </div>
+    );
+  }
+
+  const Icon = rawExtensions.has(asset.extension) ? Camera : FileImage;
+  return (
+    <div className={`thumb file-thumb ${rawExtensions.has(asset.extension) ? 'raw' : 'standard'}`}>
+      <Icon size={28} />
+      <strong>{asset.extension.replace('.', '').toUpperCase() || 'IMG'}</strong>
+      <span className={`badge ${asset.sidecarStatus}`}>{badgeLabel(asset.sidecarStatus)}</span>
+    </div>
+  );
+}
+
+function uniqueIds(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
 function canPreview(extension: string): boolean {
   return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.avif'].includes(extension);
 }
+
+const rawExtensions = new Set(['.arw', '.cr2', '.cr3', '.dng', '.nef', '.orf', '.raf', '.raw', '.rw2']);
 
 function fileUrl(filePath: string): string {
   const normalized = filePath.replace(/\\/g, '/');

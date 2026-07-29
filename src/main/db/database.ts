@@ -4,6 +4,7 @@ import initSqlJs, { Database, SqlJsStatic, SqlValue } from 'sql.js';
 import {
   AppSettings,
   AssetSortBy,
+  MapDownloadJob,
   MapPack,
   MetadataFields,
   MetadataSource,
@@ -44,6 +45,21 @@ interface MapPackRow {
   kind: 'pmtiles' | 'places-sqlite';
   importedAt: string;
   metadata_json?: string;
+}
+
+interface MapDownloadJobRow {
+  id: string;
+  region_ids_json: string;
+  detail_id: string;
+  max_zoom: number;
+  output_directory: string;
+  source_url?: string;
+  estimated_bytes: number;
+  output_paths_json: string;
+  status: MapDownloadJob['status'];
+  message?: string;
+  created_at: string;
+  completed_at?: string;
 }
 
 export class DatabaseService {
@@ -143,6 +159,55 @@ export class DatabaseService {
     await this.save();
   }
 
+  async removeMapPack(id: string): Promise<MapPack | undefined> {
+    const existing = this.getMapPack(id);
+    if (!existing) return undefined;
+    this.run('DELETE FROM map_packs WHERE id = ?', [id]);
+    await this.save();
+    return existing;
+  }
+
+  listMapDownloadJobs(): MapDownloadJob[] {
+    return this.select<MapDownloadJobRow>('SELECT * FROM map_download_jobs ORDER BY created_at DESC LIMIT 20').map(
+      mapMapDownloadJob
+    );
+  }
+
+  async upsertMapDownloadJob(job: MapDownloadJob): Promise<void> {
+    this.run(
+      `INSERT INTO map_download_jobs (
+        id, region_ids_json, detail_id, max_zoom, output_directory, source_url,
+        estimated_bytes, output_paths_json, status, message, created_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        region_ids_json = excluded.region_ids_json,
+        detail_id = excluded.detail_id,
+        max_zoom = excluded.max_zoom,
+        output_directory = excluded.output_directory,
+        source_url = excluded.source_url,
+        estimated_bytes = excluded.estimated_bytes,
+        output_paths_json = excluded.output_paths_json,
+        status = excluded.status,
+        message = excluded.message,
+        completed_at = excluded.completed_at`,
+      [
+        job.id,
+        JSON.stringify(job.regionIds),
+        job.detailId,
+        job.maxZoom,
+        job.outputDirectory,
+        job.sourceUrl,
+        job.estimatedBytes,
+        JSON.stringify(job.outputPaths),
+        job.status,
+        job.message,
+        job.createdAt,
+        job.completedAt
+      ]
+    );
+    await this.save();
+  }
+
   upsertAsset(asset: PhotoAsset): void {
     this.run(
       `INSERT INTO assets (
@@ -211,6 +276,16 @@ export class DatabaseService {
     if (ids.length === 0) return [];
     const placeholders = ids.map(() => '?').join(',');
     return this.select<AssetRow>(`SELECT * FROM assets WHERE id IN (${placeholders})`, ids).map(mapAsset);
+  }
+
+  async deleteAssetsByIds(ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const existing = this.getAssetsByIds(ids);
+    if (existing.length === 0) return 0;
+    const placeholders = ids.map(() => '?').join(',');
+    this.run(`DELETE FROM assets WHERE id IN (${placeholders})`, ids);
+    await this.save();
+    return existing.length;
   }
 
   listAssets(options: {
@@ -313,6 +388,21 @@ export class DatabaseService {
         kind TEXT NOT NULL,
         importedAt TEXT NOT NULL,
         metadata_json TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS map_download_jobs (
+        id TEXT PRIMARY KEY,
+        region_ids_json TEXT NOT NULL,
+        detail_id TEXT NOT NULL,
+        max_zoom INTEGER NOT NULL,
+        output_directory TEXT NOT NULL,
+        source_url TEXT,
+        estimated_bytes INTEGER NOT NULL,
+        output_paths_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        message TEXT,
+        created_at TEXT NOT NULL,
+        completed_at TEXT
       );
 
       CREATE TABLE IF NOT EXISTS assets (
@@ -470,6 +560,23 @@ function mapMapPack(row: MapPackRow): MapPack {
   };
 }
 
+function mapMapDownloadJob(row: MapDownloadJobRow): MapDownloadJob {
+  return {
+    id: row.id,
+    regionIds: parseStringArray(row.region_ids_json),
+    detailId: row.detail_id,
+    maxZoom: row.max_zoom,
+    outputDirectory: row.output_directory,
+    sourceUrl: row.source_url,
+    estimatedBytes: row.estimated_bytes,
+    outputPaths: parseStringArray(row.output_paths_json),
+    status: row.status,
+    message: row.message,
+    createdAt: row.created_at,
+    completedAt: row.completed_at
+  };
+}
+
 function parseMetadata(value: string): MetadataFields {
   try {
     return metadataFromUnknown(JSON.parse(value));
@@ -484,5 +591,14 @@ function parseMapPackMetadata(value: string): MapPack['metadata'] {
     return parsed && typeof parsed === 'object' ? parsed : undefined;
   } catch {
     return undefined;
+  }
+}
+
+function parseStringArray(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
   }
 }

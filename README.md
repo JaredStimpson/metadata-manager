@@ -82,7 +82,9 @@ The app can also open `MapSetup.cmd` from Tools. Manual latitude/longitude entry
 
 ## Main Workflow
 
-Use the left rail: Import -> Library -> Edit -> Export. Import registers files in place, the center browser shows thumbnails or details, the right inspector edits one photo or a batch, and Tools handles maps, sidecar status, and Immich staging export.
+Use the left rail: Import -> Library -> Edit -> Export. Import registers files in place, the center browser shows thumbnails or details, and the right inspector edits one photo or a batch.
+
+Maps live under Maintenance -> Maps. That tab handles region/detail download setup, the active map budget, installed packs, and map download history.
 
 ## Requirements
 

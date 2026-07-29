@@ -4,13 +4,22 @@ Offline maps use MapLibre GL JS with local `.pmtiles` files.
 
 ## Beginner Path
 
-Run:
+Use Maintenance -> Maps in the app for the normal path:
+
+- Pick one or more regions.
+- Pick a detail level.
+- Keep the default 5 GB budget or adjust it.
+- Choose the output folder if needed.
+- Download selected regions while online.
+- Use installed packs offline later.
+
+The fallback script is still available:
 
 ```powershell
 .\MapSetup.cmd
 ```
 
-Choose:
+It offers:
 
 - `1` for a small world overview map.
 - `2` for a custom area map.
@@ -21,15 +30,17 @@ When the script finishes, launch the app and import the generated `.pmtiles` fil
 ## Importing a Map Pack
 
 1. Launch the app.
-2. Open Tools with the rail button.
+2. Open Maintenance -> Maps.
 3. Use Import Pack and choose a `.pmtiles` file.
-4. Select it as the active map pack.
+4. Select it as the active map pack in Installed Packs.
 
 The app runs a localhost-only tile server so MapLibre can request byte ranges from the local file. The renderer never receives broad filesystem access.
 
 ## Normal Offline Use
 
 After importing a `.pmtiles` file, normal geotagging does not require internet access.
+
+Downloading new regions requires internet. The last installed packs remain registered in SQLite and stay usable after restart as long as the `.pmtiles` files remain on disk.
 
 ## Place Search
 

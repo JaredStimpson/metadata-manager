@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseService } from '../src/main/db/database';
 import { ExifToolService } from '../src/main/metadata/exiftool';
 import { LibraryService } from '../src/main/services/library-service';
-import { SourceRoot } from '../src/shared/types';
+import { PhotoAsset, SourceRoot } from '../src/shared/types';
 
 describe('library import safety', () => {
   let tempDir: string;
@@ -51,7 +51,65 @@ describe('library import safety', () => {
     expect(result.assets[0].sourceRootId).toBe(root.id);
     expect(result.assets[0].relativePath).toBe('Trip/IMG_0001.jpg');
   });
+
+  it('removes photos from the library without deleting source files', async () => {
+    const root = await createRoot(tempDir, db, 'Photos');
+    const photo = path.join(root.path, 'IMG_0002.jpg');
+    await fs.writeFile(photo, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    db.upsertAsset(asset(root, photo));
+    await db.commit();
+
+    const result = await library.removeAssetsFromLibrary(['asset-1']);
+
+    expect(result.removed).toBe(1);
+    expect(db.getAsset('asset-1')).toBeUndefined();
+    await expect(fs.stat(photo)).resolves.toBeTruthy();
+  });
+
+  it('persists map download preferences in the plan', async () => {
+    const plan = await library.saveMapDownloadPreferences({
+      regionIds: ['us-west'],
+      detailId: 'regional',
+      budgetBytes: 3 * 1024 * 1024 * 1024,
+      outputDirectory: path.join(tempDir, 'Maps')
+    });
+
+    expect(plan.preferences.regionIds).toEqual(['us-west']);
+    expect(plan.preferences.detailId).toBe('regional');
+    expect(plan.overBudget).toBe(false);
+    expect(library.getMapDownloadPlan().preferences.outputDirectory).toBe(path.join(tempDir, 'Maps'));
+  });
 });
+
+async function createRoot(tempDir: string, db: DatabaseService, name: string): Promise<SourceRoot> {
+  const root: SourceRoot = {
+    id: 'root-1',
+    path: path.join(tempDir, name),
+    name,
+    createdAt: '2026-01-01T00:00:00.000Z'
+  };
+  await fs.mkdir(root.path, { recursive: true });
+  await db.upsertSourceRoot(root);
+  return root;
+}
+
+function asset(root: SourceRoot, absolutePath: string): PhotoAsset {
+  return {
+    id: 'asset-1',
+    sourceRootId: root.id,
+    absolutePath,
+    relativePath: path.basename(absolutePath),
+    filename: path.basename(absolutePath),
+    extension: '.jpg',
+    size: 100,
+    mtimeMs: 1,
+    embedded: { tags: [] },
+    effective: { tags: [] },
+    effectiveSource: 'embedded',
+    sidecarStatus: 'none',
+    updatedAt: '2026-01-01T00:00:00.000Z'
+  };
+}
 
 function fakeExifTool(): ExifToolService {
   return {

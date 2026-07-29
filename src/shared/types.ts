@@ -54,6 +54,81 @@ export interface MapPackMetadata {
 export interface AppSettings {
   sidecarRoot?: string;
   activeMapPackId?: string;
+  mapDownloadPreferences?: MapDownloadPreferences;
+}
+
+export interface MapRegionPreset {
+  id: string;
+  label: string;
+  group: string;
+  bbox?: [number, number, number, number];
+  estimateMbByMaxZoom: Record<number, number>;
+  notes?: string;
+}
+
+export interface MapDetailPreset {
+  id: string;
+  label: string;
+  maxZoom: number;
+  description: string;
+}
+
+export interface MapDownloadPreferences {
+  regionIds: string[];
+  detailId: string;
+  budgetBytes: number;
+  outputDirectory?: string;
+  sourceUrl?: string;
+}
+
+export interface MapDownloadPlan {
+  preferences: MapDownloadPreferences;
+  regions: MapRegionPreset[];
+  details: MapDetailPreset[];
+  estimatedBytes: number;
+  budgetBytes: number;
+  overBudget: boolean;
+  installedPacks: MapPack[];
+  jobs: MapDownloadJob[];
+  defaultOutputDirectory: string;
+}
+
+export type MapDownloadStatus = 'planned' | 'running' | 'completed' | 'failed';
+
+export interface MapDownloadJob {
+  id: string;
+  regionIds: string[];
+  detailId: string;
+  maxZoom: number;
+  outputDirectory: string;
+  sourceUrl?: string;
+  estimatedBytes: number;
+  outputPaths: string[];
+  status: MapDownloadStatus;
+  message?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface MapDownloadRequest {
+  regionIds: string[];
+  detailId: string;
+  budgetBytes?: number;
+  outputDirectory?: string;
+  sourceUrl?: string;
+}
+
+export interface MapDownloadResult {
+  job: MapDownloadJob;
+  mapPacks: MapPack[];
+  errors: Array<{ regionId: string; message: string }>;
+}
+
+export interface RemoveMapPackResult {
+  removed: boolean;
+  deletedFile: boolean;
+  settings: AppSettings;
+  mapPacks: MapPack[];
 }
 
 export type AssetSortBy = 'filename' | 'date' | 'rating' | 'location' | 'edited' | 'fileType' | 'updated';
@@ -126,6 +201,10 @@ export interface ImportFilesResult {
   errors: Array<{ path: string; message: string }>;
 }
 
+export interface RemoveAssetsResult {
+  removed: number;
+}
+
 export interface ExportResult {
   id: string;
   destination: string;
@@ -161,11 +240,16 @@ export interface PhotoMetadataApi {
   updateSettings(settings: Partial<AppSettings>): Promise<AppSettings>;
   addSourceRoots(paths: string[]): Promise<SourceRoot[]>;
   addImportedFiles(paths: string[]): Promise<ImportFilesResult>;
+  removeAssetsFromLibrary(assetIds: string[]): Promise<RemoveAssetsResult>;
   scanSourceRoot(sourceRootId: string): Promise<ScanResult>;
   listAssets(query?: AssetQuery): Promise<PhotoAsset[]>;
   saveMetadata(assetIds: string[], patch: MetadataPatch): Promise<SaveMetadataResult>;
   revertSidecars(assetIds: string[]): Promise<PhotoAsset[]>;
   importMapPack(path: string): Promise<MapPack>;
+  getMapDownloadPlan(): Promise<MapDownloadPlan>;
+  saveMapDownloadPreferences(preferences: MapDownloadPreferences): Promise<MapDownloadPlan>;
+  downloadMapSelection(request: MapDownloadRequest): Promise<MapDownloadResult>;
+  removeMapPack(id: string, deleteFile?: boolean): Promise<RemoveMapPackResult>;
   listMapPacks(): Promise<MapPack[]>;
   searchPlaces(query: string): Promise<LocalPlace[]>;
   exportImmich(assetIds: string[] | 'all', destination: string): Promise<ExportResult>;
@@ -184,11 +268,16 @@ export const photoMetadataCapabilities = [
   'updateSettings',
   'addSourceRoots',
   'addImportedFiles',
+  'removeAssetsFromLibrary',
   'scanSourceRoot',
   'listAssets',
   'saveMetadata',
   'revertSidecars',
   'importMapPack',
+  'getMapDownloadPlan',
+  'saveMapDownloadPreferences',
+  'downloadMapSelection',
+  'removeMapPack',
   'listMapPacks',
   'searchPlaces',
   'exportImmich',
