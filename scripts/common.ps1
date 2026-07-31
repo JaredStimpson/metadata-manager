@@ -169,7 +169,11 @@ function Get-PmtilesCli {
   if (-not $found) {
     throw 'Downloaded PMTiles CLI archive did not contain pmtiles.exe.'
   }
-  Copy-Item -LiteralPath $found.FullName -Destination $pmtilesExe -Force
+  $foundPath = [IO.Path]::GetFullPath($found.FullName)
+  $destinationPath = [IO.Path]::GetFullPath($pmtilesExe)
+  if (-not $foundPath.Equals($destinationPath, [StringComparison]::OrdinalIgnoreCase)) {
+    Copy-Item -LiteralPath $foundPath -Destination $destinationPath -Force
+  }
   return (Resolve-Path $pmtilesExe).Path
 }
 
