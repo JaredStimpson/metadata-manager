@@ -161,7 +161,9 @@ function Get-PmtilesCli {
   }
 
   $zipPath = Join-Path $toolsDir $asset.name
+  Write-Host "Downloading PMTiles CLI asset: $($asset.browser_download_url)"
   Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -Headers @{ 'User-Agent' = 'metadata-manager-setup' }
+  Write-Host "PMTiles CLI archive downloaded: $zipPath"
   Expand-Archive -Path $zipPath -DestinationPath $toolsDir -Force
   $found = Get-ChildItem -LiteralPath $toolsDir -Recurse -Filter pmtiles.exe -File | Select-Object -First 1
   if (-not $found) {
@@ -173,16 +175,21 @@ function Get-PmtilesCli {
 
 function Get-LatestProtomapsBuildUrl {
   Write-Host ''
-  Write-Host 'Finding latest Protomaps basemap build...'
-  $page = Invoke-WebRequest -Uri 'https://maps.protomaps.com/builds' -Headers @{ 'User-Agent' = 'metadata-manager-setup' }
-  $matches = [regex]::Matches($page.Content, 'https://build\.protomaps\.com/(\d{8})\.pmtiles|(\d{8})\.pmtiles')
-  $dates = foreach ($match in $matches) {
-    if ($match.Groups[1].Value) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+  Write-Host 'Finding an available official Protomaps daily basemap build...'
+  $today = [DateTime]::UtcNow.Date
+  for ($daysAgo = 0; $daysAgo -lt 21; $daysAgo++) {
+    $date = $today.AddDays(-$daysAgo).ToString('yyyyMMdd')
+    $candidate = "https://build.protomaps.com/$date.pmtiles"
+    Write-Host "Checking build: $candidate"
+    try {
+      $response = Invoke-WebRequest -UseBasicParsing -Uri $candidate -Method Head -MaximumRedirection 5 -TimeoutSec 20 -Headers @{ 'User-Agent' = 'photo-metadata-manager' }
+      if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
+        Write-Host "Using official basemap build: $candidate"
+        return $candidate
+      }
+    } catch {
+      Write-Host "Build unavailable: $date"
+    }
   }
-  $latest = $dates | Sort-Object -Descending | Select-Object -First 1
-  if (-not $latest) {
-    Start-Process 'https://maps.protomaps.com/builds'
-    throw 'Could not discover the latest Protomaps build. Opened the builds page so you can copy a PMTiles URL manually.'
-  }
-  return "https://build.protomaps.com/$latest.pmtiles"
+  throw 'Could not find an available Protomaps daily build from the last 21 days. Open https://maps.protomaps.com/builds, copy a PMTiles URL, and paste it into Source PMTiles URL.'
 }

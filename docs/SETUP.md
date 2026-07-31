@@ -26,6 +26,8 @@ If any `.cmd` wrapper fails, it prints the exit code and waits for a key press b
 
 This starts the Electron development app with hot reload.
 
+After launch, Maintenance -> Settings shows the local backend port and persistent log path. The default backend URL is `http://127.0.0.1:43821`; if that port is occupied, the app chooses an available localhost port and displays it there.
+
 ## Build
 
 ```powershell

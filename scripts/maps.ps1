@@ -38,6 +38,9 @@ New-Item -ItemType Directory -Force -Path $mapsDir | Out-Null
 
 $pmtilesExe = Get-PmtilesCli
 $source = if ($SourceUrl) { $SourceUrl } else { Get-LatestProtomapsBuildUrl }
+Write-Host "PMTiles CLI: $pmtilesExe"
+Write-Host "Remote source: $source"
+Write-Host 'The extract command uses HTTP range requests and may take time before its first progress update.'
 
 if ($Mode -eq 'Custom') {
   if (-not $Bbox) {
@@ -54,6 +57,7 @@ if ($Mode -eq 'Custom') {
   }
   Write-Host ''
   Write-Host "Creating custom map: $Output"
+  Write-Host "Starting network extraction for bounding box $Bbox through zoom $MaxZoom..."
   & $pmtilesExe extract $source $Output "--bbox=$Bbox" "--maxzoom=$MaxZoom"
   Assert-LastExitCode 'pmtiles extract custom area'
 } else {
@@ -62,6 +66,7 @@ if ($Mode -eq 'Custom') {
   }
   Write-Host ''
   Write-Host "Creating starter map: $Output"
+  Write-Host "Starting network extraction through zoom $MaxZoom..."
   & $pmtilesExe extract $source $Output "--maxzoom=$MaxZoom"
   Assert-LastExitCode 'pmtiles extract starter map'
 }
@@ -71,4 +76,3 @@ Write-Host 'Map file ready:'
 Write-Host $Output
 Write-Host ''
 Write-Host 'In the app, click Map Pack and choose this .pmtiles file.'
-

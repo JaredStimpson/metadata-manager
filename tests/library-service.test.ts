@@ -74,6 +74,27 @@ describe('library import safety', () => {
     expect(second.id).toBe(first.id);
   });
 
+  it('clears session caches when the source changes or the photo session closes', async () => {
+    let clearCount = 0;
+    const libraryWithCache = new LibraryService(db, fakeExifTool(), process.cwd(), {
+      sessionCache: {
+        clear: async () => {
+          clearCount += 1;
+        }
+      }
+    });
+    const firstPath = path.join(tempDir, 'First');
+    const secondPath = path.join(tempDir, 'Second');
+    await fs.mkdir(firstPath, { recursive: true });
+    await fs.mkdir(secondPath, { recursive: true });
+
+    await libraryWithCache.setSourceRoot(firstPath);
+    await libraryWithCache.setSourceRoot(secondPath);
+    await libraryWithCache.clearPhotoSession();
+
+    expect(clearCount).toBe(3);
+  });
+
   it('clears source paths and assets while preserving persistent settings', async () => {
     const root = await createRoot(tempDir, db, 'Photos');
     const photo = path.join(root.path, 'IMG_0003.jpg');
@@ -168,6 +189,7 @@ function fakeExifTool(): ExifToolService {
   return {
     readEmbedded: async () => ({ metadata: { tags: [] as string[] } }),
     readSidecar: async () => ({ tags: [] as string[] }),
+    extractBestPreview: async () => false,
     end: async () => undefined
   } as ExifToolService;
 }

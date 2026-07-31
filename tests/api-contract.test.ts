@@ -22,7 +22,8 @@ describe('desktop bridge contract', () => {
         'removeMapPack',
         'searchPlaces',
         'exportImmich',
-        'openMapSetup'
+        'openMapSetup',
+        'onBackendLog'
       ])
     );
   });

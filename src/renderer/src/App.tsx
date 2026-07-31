@@ -48,6 +48,7 @@ import {
   AppSettings,
   AssetQuery,
   AssetSortBy,
+  BackendProgress,
   HealthStatus,
   InitialState,
   LocalPlace,
@@ -108,6 +109,7 @@ export function App(): JSX.Element {
   const [sourceRoots, setSourceRoots] = useState<SourceRoot[]>([]);
   const [mapPacks, setMapPacks] = useState<MapPack[]>([]);
   const [mapPlan, setMapPlan] = useState<MapDownloadPlan>();
+  const [mapProgress, setMapProgress] = useState<BackendProgress>();
   const [mapDraft, setMapDraft] = useState<MapDownloadPreferences>({
     regionIds: ['world-overview'],
     detailId: 'travel',
@@ -159,6 +161,28 @@ export function App(): JSX.Element {
       return;
     }
     void loadInitial();
+  }, [bridgeAvailable]);
+
+  useEffect(() => {
+    if (!bridgeAvailable) return;
+    apiClient.onBackendLog((entry) => {
+      if (entry.scope === 'maps' && entry.progress) setMapProgress(entry.progress);
+      if (entry.scope !== 'maps' && entry.level !== 'error') return;
+      setActivityEntries((current) =>
+        [
+          ...current,
+          {
+            id: entry.id,
+            taskId: entry.operationId ?? entry.id,
+            label: `backend:${entry.scope}`,
+            message: entry.message,
+            status: entry.level === 'error' ? ('error' as const) : ('info' as const),
+            timestamp: Date.parse(entry.timestamp) || Date.now()
+          }
+        ].slice(-250)
+      );
+      if (entry.level === 'error') setActivityCollapsed(false);
+    });
   }, [bridgeAvailable]);
 
   useEffect(() => {
@@ -355,6 +379,12 @@ export function App(): JSX.Element {
   }
 
   async function downloadMapSelection(): Promise<void> {
+    setMapProgress({
+      current: 0,
+      total: mapDraft.regionIds.length,
+      percent: 0,
+      phase: 'requesting backend download'
+    });
     await runTask('Download offline maps', async (progress) => {
       progress(
         `Preparing ${mapDraft.regionIds.length} region${mapDraft.regionIds.length === 1 ? '' : 's'} at ${mapDraft.detailId} detail.`
@@ -468,6 +498,21 @@ export function App(): JSX.Element {
   async function revealSelected(): Promise<void> {
     if (!selectedAsset) return;
     await runTask('Reveal photo', () => apiClient.revealPath(selectedAsset.absolutePath));
+  }
+
+  async function openBackendConsole(): Promise<void> {
+    if (!health?.backendUrl) return;
+    await runTask('Open backend console', async (progress) => {
+      progress(`Opening persistent backend logs on port ${health.backendPort}.`);
+      await apiClient.openExternal(health.backendUrl);
+    });
+  }
+
+  async function revealBackendLog(): Promise<void> {
+    if (!health?.backendLogPath) return;
+    await runTask('Reveal backend log', async () => {
+      await apiClient.revealPath(health.backendLogPath);
+    });
   }
 
   async function searchPlaces(placeQuery: string): Promise<LocalPlace[]> {
@@ -714,6 +759,11 @@ export function App(): JSX.Element {
           </div>
           <div className="health-pills">
             <StatusPill ok={Boolean(health)} label={health ? `Bridge ${health.appVersion}` : 'Bridge'} title="The secure Electron connection to local files is available" />
+            <StatusPill
+              ok={Boolean(health?.backendUrl)}
+              label={health ? `Backend :${health.backendPort}` : 'Backend'}
+              title="The localhost backend runs file processes and keeps persistent diagnostic logs"
+            />
             <StatusPill ok label="Source unchanged" title="The app reads source photos but never writes metadata into them" />
             <StatusPill ok={Boolean(settings.sidecarRoot)} label="Sidecar mirror" title="Editable metadata is stored separately in the configured XMP mirror" />
             <StatusPill ok={Boolean(tileServerUrl)} label="Tile server" title="The local-only map tile service is ready for offline maps" />
@@ -726,6 +776,7 @@ export function App(): JSX.Element {
             draft={mapDraft}
             settings={settings}
             busy={busy}
+            progress={mapProgress}
             onDraftChange={setMapDraft}
             onChooseOutputDirectory={chooseMapOutputDirectory}
             onSavePreferences={saveMapPreferences}
@@ -743,6 +794,8 @@ export function App(): JSX.Element {
             currentSource={currentSource}
             busy={busy}
             onChooseSidecarRoot={chooseSidecarRoot}
+            onOpenBackendConsole={openBackendConsole}
+            onRevealBackendLog={revealBackendLog}
           />
         ) : (
           <>
@@ -955,7 +1008,7 @@ export function App(): JSX.Element {
                   onClick={(event) => selectAsset(asset, index, event)}
                   title={asset.relativePath}
                 >
-                  <AssetThumbnail asset={asset} />
+                  <AssetThumbnail asset={asset} backendUrl={health?.backendUrl} />
                   <span>{asset.filename}</span>
                   <small>{assetSummary(asset)}</small>
                 </button>
@@ -1279,13 +1332,17 @@ function SettingsMaintenance({
   health,
   currentSource,
   busy,
-  onChooseSidecarRoot
+  onChooseSidecarRoot,
+  onOpenBackendConsole,
+  onRevealBackendLog
 }: {
   settings: AppSettings;
   health?: HealthStatus;
   currentSource?: SourceRoot;
   busy?: string;
   onChooseSidecarRoot(): void;
+  onOpenBackendConsole(): void;
+  onRevealBackendLog(): void;
 }): JSX.Element {
   return (
     <section className="settings-maintenance">
@@ -1297,6 +1354,44 @@ function SettingsMaintenance({
       </div>
 
       <div className="settings-grid">
+        <section className="maintenance-panel">
+          <div className="panel-title">
+            <div>
+              <h2>Backend Console</h2>
+              <span>Persistent process and crash history</span>
+            </div>
+            <Terminal size={17} />
+          </div>
+          <p className="panel-copy">
+            The local backend records IPC, map downloads, thumbnail work, and crashes. Its web page stays available if the frontend renderer fails, and its log survives a full restart.
+          </p>
+          <dl className="health-list">
+            <dt>Port</dt>
+            <dd>{health ? `127.0.0.1:${health.backendPort}` : 'Starting...'}</dd>
+            <dt>Console</dt>
+            <dd title={health?.backendUrl}>{health?.backendUrl ?? '-'}</dd>
+            <dt>Log file</dt>
+            <dd title={health?.backendLogPath}>{health ? compactPath(health.backendLogPath) : '-'}</dd>
+          </dl>
+          <div className="button-row wrap">
+            <button
+              className="primary"
+              disabled={!health?.backendUrl}
+              onClick={onOpenBackendConsole}
+              title="Open the localhost backend web console with live and historical logs"
+            >
+              <Terminal size={16} /> Open Console
+            </button>
+            <button
+              disabled={!health?.backendLogPath}
+              onClick={onRevealBackendLog}
+              title="Reveal the persistent NDJSON backend log in File Explorer"
+            >
+              <FolderOpen size={16} /> Reveal Log
+            </button>
+          </div>
+        </section>
+
         <section className="maintenance-panel">
           <div className="panel-title">
             <div>
@@ -1362,6 +1457,8 @@ function SettingsMaintenance({
             <dd title={health?.userDataPath}>{health ? compactPath(health.userDataPath) : '-'}</dd>
             <dt>Bridge</dt>
             <dd>{health ? `${health.capabilities.length} IPC actions available` : 'Not connected'}</dd>
+            <dt>Backend</dt>
+            <dd>{health ? `Listening on port ${health.backendPort}` : 'Not running'}</dd>
             <dt>Tile server</dt>
             <dd>{health?.tileServerRunning ? health.tileServerUrl : 'Not running'}</dd>
             <dt>Source safety</dt>
@@ -1508,12 +1605,32 @@ function dateTimeLocalValue(value: string): string {
   return inputMatch?.[1] ?? '';
 }
 
-function AssetThumbnail({ asset }: { asset: PhotoAsset }): JSX.Element {
+function AssetThumbnail({
+  asset,
+  backendUrl
+}: {
+  asset: PhotoAsset;
+  backendUrl?: string;
+}): JSX.Element {
   const [failed, setFailed] = useState(false);
-  if (canPreview(asset.extension) && !failed) {
+  const thumbnailUrl = backendUrl
+    ? `${backendUrl}/thumbnails/${encodeURIComponent(asset.id)}?v=${Math.trunc(asset.mtimeMs)}-${asset.size}`
+    : undefined;
+
+  useEffect(() => {
+    setFailed(false);
+  }, [asset.id, asset.mtimeMs, asset.size, backendUrl]);
+
+  if (thumbnailUrl && !failed) {
     return (
       <div className="thumb">
-        <img src={fileUrl(asset.absolutePath)} alt="" onError={() => setFailed(true)} />
+        <img
+          src={thumbnailUrl}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailed(true)}
+        />
         <span className={`badge ${asset.sidecarStatus}`}>{badgeLabel(asset.sidecarStatus)}</span>
       </div>
     );
@@ -1533,17 +1650,4 @@ function uniqueIds(values: string[]): string[] {
   return [...new Set(values)];
 }
 
-function canPreview(extension: string): boolean {
-  return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.avif'].includes(extension);
-}
-
 const rawExtensions = new Set(['.arw', '.cr2', '.cr3', '.dng', '.nef', '.orf', '.raf', '.raw', '.rw2']);
-
-function fileUrl(filePath: string): string {
-  const normalized = filePath.replace(/\\/g, '/');
-  const parts = normalized.replace(/^\/+/, '').split('/');
-  const encoded = parts
-    .map((part, index) => (index === 0 && /^[A-Za-z]:$/.test(part) ? part : encodeURIComponent(part)))
-    .join('/');
-  return `file:///${encoded}`;
-}

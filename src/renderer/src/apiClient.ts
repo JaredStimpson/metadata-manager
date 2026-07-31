@@ -1,6 +1,7 @@
 import {
   AppSettings,
   AssetQuery,
+  BackendLogEntry,
   HealthStatus,
   ImportFilesResult,
   MapDownloadPreferences,
@@ -66,7 +67,12 @@ export const apiClient = {
     call('Export for Immich', (api) => api.exportImmich(assetIds, destination)),
   revealPath: (path: string) => call('Reveal path', (api) => api.revealPath(path)),
   openExternal: (url: string) => call('Open link', (api) => api.openExternal(url)),
-  openMapSetup: () => call('Open map setup', (api) => api.openMapSetup())
+  openMapSetup: () => call('Open map setup', (api) => api.openMapSetup()),
+  onBackendLog: (listener: (entry: BackendLogEntry) => void): void => {
+    const bridge = getOptionalBridge();
+    if (!bridge) throw new DesktopBridgeUnavailableError();
+    bridge.onBackendLog(listener);
+  }
 };
 
 async function call<T>(action: string, fn: (api: PhotoMetadataApi) => Promise<T>): Promise<T> {

@@ -10,6 +10,7 @@ import {
 import { estimateMapDownloadBytes, formatBytes, getMapDetail } from '../../../shared/mapCatalog';
 import {
   AppSettings,
+  BackendProgress,
   MapDownloadPlan,
   MapDownloadPreferences,
   MapPack
@@ -20,6 +21,7 @@ interface MapMaintenancePanelProps {
   draft: MapDownloadPreferences;
   settings: AppSettings;
   busy?: string;
+  progress?: BackendProgress;
   onDraftChange(preferences: MapDownloadPreferences): void;
   onChooseOutputDirectory(): void;
   onSavePreferences(): void;
@@ -36,6 +38,7 @@ export function MapMaintenancePanel({
   draft,
   settings,
   busy,
+  progress,
   onDraftChange,
   onChooseOutputDirectory,
   onSavePreferences,
@@ -123,19 +126,18 @@ export function MapMaintenancePanel({
           </div>
 
           <label>
-            Active map budget
+            Advisory map budget
             <div className="budget-row">
               <input
                 type="number"
-                min="0.5"
-                max="25"
+                min="0.1"
                 step="0.5"
                 value={(budgetBytes / 1024 / 1024 / 1024).toString()}
-                title="Maximum estimated size allowed for one selected map download"
+                title="Planning target used by the size graph. It never blocks a download."
                 onChange={(event) =>
                   onDraftChange({
                     ...draft,
-                    budgetBytes: Math.max(Number(event.target.value) || 0.5, 0.5) * 1024 * 1024 * 1024
+                    budgetBytes: Math.max(Number(event.target.value) || 0.1, 0.1) * 1024 * 1024 * 1024
                   })
                 }
               />
@@ -150,7 +152,25 @@ export function MapMaintenancePanel({
             <strong>{formatBytes(estimateBytes)}</strong>
             <span>estimated of {formatBytes(budgetBytes)} budget</span>
           </div>
-          {overBudget && <div className="soft-warning">Choose fewer regions, lower detail, or raise the budget before downloading.</div>}
+          {overBudget && (
+            <div className="soft-warning">
+              This exceeds your planning target, but the download is still allowed.
+            </div>
+          )}
+
+          {(busy === 'Download offline maps' || progress) && (
+            <div className="map-download-progress" aria-live="polite">
+              <div>
+                <strong>{progress?.phase ?? 'Preparing map download'}</strong>
+                <span>
+                  {progress ? `${progress.current} of ${progress.total}` : 'Waiting for the downloader'}
+                </span>
+              </div>
+              <div className="progress-track">
+                <span style={{ width: `${progress?.percent ?? 2}%` }} />
+              </div>
+            </div>
+          )}
 
           <label>
             Output folder
@@ -178,11 +198,11 @@ export function MapMaintenancePanel({
             </button>
             <button
               className="primary"
-              disabled={Boolean(busy) || draft.regionIds.length === 0 || overBudget}
+              disabled={Boolean(busy) || draft.regionIds.length === 0}
               onClick={onDownloadSelection}
               title="Download and extract each selected region into a validated offline PMTiles pack"
             >
-              <Download size={16} /> Download Selected
+              <Download size={16} /> {busy === 'Download offline maps' ? 'Downloading' : 'Download Selected'}
             </button>
           </div>
         </section>

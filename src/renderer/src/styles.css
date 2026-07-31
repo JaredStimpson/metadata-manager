@@ -1445,6 +1445,389 @@ p {
   fill: #6f9fc6;
 }
 
+/* Console workstation theme */
+:root {
+  color: #c8e6d2;
+  background: #07100d;
+  font-family: "Cascadia Mono", "Lucida Console", Consolas, monospace;
+  color-scheme: dark;
+}
+
+body,
+.workflow-shell {
+  background: #07100d;
+  color: #c8e6d2;
+}
+
+button,
+input,
+textarea,
+select {
+  border-color: #355346;
+  border-radius: 3px;
+  background: #0d1915;
+  color: #c8e6d2;
+}
+
+button:hover:not(:disabled) {
+  border-color: #78d7a3;
+  background: #14281f;
+  color: #ecfff2;
+}
+
+button.primary,
+.segmented .active,
+.view-toggle .active,
+.rating-control .active {
+  border-color: #7ce2a7;
+  background: #65c98d;
+  color: #06100b;
+  font-weight: 700;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: #67d9d4;
+  box-shadow: 0 0 0 1px rgba(103, 217, 212, 0.32);
+}
+
+input:disabled,
+textarea:disabled,
+select:disabled {
+  background: #101b17;
+  color: #658073;
+}
+
+label,
+.panel-copy,
+.import-heading p,
+.import-session-note span,
+.status-banner span,
+.maintenance-header span,
+.browser-header span,
+.panel-title span,
+.setup-item span,
+.asset-tile small,
+.health-list dd,
+.meta-list dd,
+.empty-library span,
+.no-map-panel span,
+.workflow-card p {
+  color: #88a99a;
+}
+
+.workflow-rail {
+  border-color: #29443a;
+  background: #050c09;
+  color: #e1faea;
+}
+
+.rail-brand {
+  color: #79e0a4;
+}
+
+.rail-group small {
+  color: #5d8875;
+}
+
+.workflow-rail button {
+  color: #86a99a;
+}
+
+.workflow-rail button:hover,
+.workflow-rail button.active {
+  border-color: #315848;
+  background: #10241b;
+  color: #8ff0b7;
+}
+
+.status-banner,
+.workflow-card,
+.browser-panel,
+.inspector-section,
+.import-workspace,
+.maintenance-header,
+.maintenance-panel,
+.detail-view {
+  border-color: #29483a;
+  border-radius: 4px;
+  background: #0a1411;
+}
+
+.status-banner.working {
+  border-color: #c99b45;
+  background: #1d190d;
+}
+
+.status-pill {
+  border-color: #345045;
+  border-radius: 3px;
+  background: #0d1915;
+  color: #87a899;
+}
+
+.status-pill.ok,
+.current-source-chip.active,
+.setup-item.ok {
+  border-color: #4f9d70;
+  background: #10241a;
+  color: #7ee0a6;
+}
+
+.import-session-note {
+  border-color: #38755a;
+  border-radius: 4px;
+  background: #0e2118;
+  color: #79dca2;
+}
+
+.setup-item,
+.current-source-chip,
+.asset-table th {
+  border-color: #29483a;
+  border-radius: 3px;
+  background: #0c1914;
+}
+
+.setup-item svg,
+.searchbox svg,
+.tag-entry svg,
+.place-search svg {
+  color: #759888;
+}
+
+.setup-item.ok svg {
+  color: #74d79c;
+}
+
+.view-toggle {
+  border-color: #355346;
+  border-radius: 3px;
+}
+
+.asset-tile {
+  border-color: #2f4c40;
+  background: #0c1713;
+}
+
+.asset-tile.selected {
+  border-color: #e080ac;
+  box-shadow: 0 0 0 1px rgba(224, 128, 172, 0.48);
+}
+
+.thumb {
+  border-radius: 2px;
+  background: #15231d;
+}
+
+.file-thumb,
+.file-thumb.raw,
+.file-thumb.standard {
+  background: #12211b;
+  color: #67d9d4;
+}
+
+.badge,
+.inline-badge {
+  border-radius: 2px;
+  background: #506b60;
+}
+
+.badge.mirror,
+.inline-badge.mirror {
+  background: #4da774;
+}
+
+.badge.adjacent,
+.inline-badge.adjacent {
+  background: #3f8ba1;
+}
+
+.badge.conflict,
+.inline-badge.conflict {
+  background: #b44f79;
+}
+
+.asset-table th,
+.asset-table td {
+  border-color: #223a30;
+}
+
+.asset-table tr.selected {
+  background: #261621;
+}
+
+.empty-library,
+.no-map-panel,
+.map-empty {
+  border-color: #436758;
+  background: #0b1712;
+}
+
+.region-item,
+.installed-map,
+.job-item,
+.map-pack-summary,
+.field-state,
+.health-list {
+  border-color: #2f4d40;
+  background: #0d1915;
+}
+
+.region-item.selected,
+.installed-map.active {
+  border-color: #5ac286;
+  background: #10251b;
+}
+
+.detail-options button.active {
+  border-color: #67d9d4;
+  background: #123130;
+  color: #8af0e9;
+}
+
+.budget-meter,
+.progress-track {
+  overflow: hidden;
+  border: 1px solid #355346;
+  border-radius: 2px;
+  background: #07100d;
+}
+
+.budget-meter span,
+.progress-track span {
+  display: block;
+  height: 100%;
+  background: #65c98d;
+  transition: width 180ms ease;
+}
+
+.budget-meter.over span {
+  background: #d6a84f;
+}
+
+.map-download-progress {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #3f7762;
+  border-radius: 3px;
+  background: #0d2118;
+  padding: 9px;
+}
+
+.map-download-progress > div:first-child {
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #87a899;
+  font-size: 11px;
+}
+
+.map-download-progress strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #8feab4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-track {
+  height: 9px;
+}
+
+.soft-warning,
+.map-plan-panel .soft-warning {
+  border-color: #8f6f31;
+  background: #211b0d;
+  color: #e5bd69;
+}
+
+.job-item.completed {
+  border-left-color: #64d092;
+}
+
+.job-item.failed,
+.map-error {
+  border-color: #934761;
+  background: #251118;
+  color: #f19bb9;
+}
+
+.metadata-inspector,
+.tools-drawer {
+  border-color: #29483a;
+  background: #08120e;
+}
+
+.tag-chips button {
+  border-color: #397061;
+  background: #10231d;
+  color: #9adbc3;
+}
+
+.field-state {
+  color: #91ac9f;
+}
+
+.field-state.changed {
+  border-color: #9f7f3b;
+  background: #211b0d;
+  color: #e4bb66;
+}
+
+.map-canvas {
+  background: #0b1712;
+}
+
+.bridge-missing {
+  background: #07100d;
+  color: #c8e6d2;
+}
+
+.bridge-missing code {
+  border-color: #355346;
+  background: #0d1915;
+  color: #78d7a3;
+}
+
+.settings-grid {
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+}
+
+.activity-console {
+  border-color: #315044;
+  background: #050c09;
+}
+
+.activity-console > header {
+  border-color: #29443a;
+  background: #09130f;
+}
+
+.activity-title strong {
+  color: #83e8aa;
+}
+
+.activity-title span,
+.activity-line time,
+.activity-line small {
+  color: #678a7b;
+}
+
+.activity-line {
+  border-color: rgba(99, 158, 133, 0.18);
+}
+
+.activity-line strong {
+  color: #a5dec0;
+}
+
+.activity-line span {
+  color: #91b2a3;
+}
+
 @media (max-width: 1280px) {
   .workflow-shell,
   .workflow-shell.editor-open {

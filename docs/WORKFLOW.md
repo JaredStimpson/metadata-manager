@@ -23,6 +23,8 @@ The app scans supported photo files and reads:
 - Adjacent sidecars if they already exist next to the media.
 - Mirror sidecars from the configured sidecar mirror folder.
 
+Library tiles request cached JPEG thumbnails from the localhost backend. Standard photos use Electron's native decoder; supported RAW files fall back to an embedded ExifTool preview. The cache is cleared whenever the current source changes and never writes into the photo source.
+
 ## Editing Metadata
 
 Browse photos in the center library, switch between thumbnail/detail view, filter/sort the list, then select one or more photos. The right inspector edits:
@@ -58,7 +60,7 @@ With an offline map pack installed:
 
 Without a map pack, use the manual latitude and longitude fields.
 
-Map downloading and installed-pack cleanup are not part of the photo workflow. Use Maintenance -> Maps for regions, depth/detail, budget, download output folder, active pack, unregister, and app-managed file deletion.
+Map downloading and installed-pack cleanup are not part of the photo workflow. Use Maintenance -> Maps for regions, depth/detail, advisory budget, download output folder, active pack, unregister, and app-managed file deletion. The budget controls only the planning graph and never blocks a download.
 
 ## Batch Editing
 
@@ -83,5 +85,7 @@ The startup banner shows whether the Electron preload bridge is connected. If th
 ## Activity And Help
 
 The docked Activity console shows a terminal-style session log. Every operation has a start line, progress messages, success or failure state, and elapsed time while running. Errors automatically expand the console so failures do not disappear.
+
+For history or deeper troubleshooting, open Maintenance -> Settings -> Backend Console. It shows the localhost port, live logs, crash history, map downloader output, and thumbnail work. Its NDJSON log survives app restart.
 
 Hover buttons, fields, status pills, source indicators, and map controls for a short explanation. Configuration controls are kept under Maintenance, while photo actions stay in Import, Library, Edit, or Export.

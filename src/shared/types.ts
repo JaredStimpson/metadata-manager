@@ -168,9 +168,32 @@ export interface HealthStatus {
   appVersion: string;
   userDataPath: string;
   sidecarRoot?: string;
+  backendPort: number;
+  backendUrl: string;
+  backendLogPath: string;
   tileServerRunning: boolean;
   tileServerUrl?: string;
   capabilities: string[];
+}
+
+export type BackendLogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export interface BackendProgress {
+  current: number;
+  total: number;
+  percent: number;
+  phase: string;
+}
+
+export interface BackendLogEntry {
+  id: string;
+  timestamp: string;
+  level: BackendLogLevel;
+  scope: string;
+  message: string;
+  operationId?: string;
+  details?: Record<string, unknown>;
+  progress?: BackendProgress;
 }
 
 export interface ScanResult {
@@ -256,6 +279,7 @@ export interface PhotoMetadataApi {
   revealPath(path: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   openMapSetup(): Promise<void>;
+  onBackendLog(listener: (entry: BackendLogEntry) => void): void;
 }
 
 export const photoMetadataCapabilities = [
@@ -283,7 +307,8 @@ export const photoMetadataCapabilities = [
   'exportImmich',
   'revealPath',
   'openExternal',
-  'openMapSetup'
+  'openMapSetup',
+  'onBackendLog'
 ] as const;
 
 export const emptyMetadata = (): MetadataFields => ({

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   AppSettings,
   AssetQuery,
+  BackendLogEntry,
   MapDownloadPreferences,
   MapDownloadRequest,
   MetadataPatch,
@@ -34,7 +35,11 @@ const api: PhotoMetadataApi = {
   exportImmich: (assetIds: string[] | 'all', destination: string) => ipcRenderer.invoke('export:immich', assetIds, destination),
   revealPath: (path: string) => ipcRenderer.invoke('path:reveal', path),
   openExternal: (url: string) => ipcRenderer.invoke('external:open', url),
-  openMapSetup: () => ipcRenderer.invoke('tools:openMapSetup')
+  openMapSetup: () => ipcRenderer.invoke('tools:openMapSetup'),
+  onBackendLog: (listener: (entry: BackendLogEntry) => void) => {
+    ipcRenderer.removeAllListeners('backend:log');
+    ipcRenderer.on('backend:log', (_event, entry: BackendLogEntry) => listener(entry));
+  }
 };
 
 contextBridge.exposeInMainWorld('photoMeta', api);

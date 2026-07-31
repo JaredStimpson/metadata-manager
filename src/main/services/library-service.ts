@@ -19,6 +19,7 @@ import {
 } from '../metadata/paths';
 import { removeXmpSidecar, writeXmpSidecar } from '../metadata/xmp';
 import { isSupportedImagePath } from '../../shared/media';
+import { BackendLogger } from './backend-logger';
 import {
   defaultMapDownloadPreferences,
   estimateMapDownloadBytes,
@@ -50,11 +51,19 @@ import {
   SourceRoot
 } from '../../shared/types';
 
+interface LibraryServiceOptions {
+  logger?: BackendLogger;
+  sessionCache?: {
+    clear(): Promise<void>;
+  };
+}
+
 export class LibraryService {
   constructor(
     private readonly db: DatabaseService,
     private readonly exiftool: ExifToolService,
-    private readonly projectRoot = process.cwd()
+    private readonly projectRoot = process.cwd(),
+    private readonly options: LibraryServiceOptions = {}
   ) {}
 
   async updateSettings(settings: Partial<AppSettings>): Promise<AppSettings> {
@@ -73,6 +82,7 @@ export class LibraryService {
   async clearPhotoSession(): Promise<void> {
     await this.migrateLegacySidecarDirectories();
     await this.db.clearPhotoSession();
+    await this.clearSessionCache();
   }
 
   async setSourceRoot(rootPath: string): Promise<SourceRoot> {
@@ -96,6 +106,10 @@ export class LibraryService {
     };
 
     await this.db.replacePhotoSessionSource(sourceRoot);
+    await this.clearSessionCache();
+    this.options.logger?.info('library', `Current source changed to ${sourceRoot.name}.`, {
+      details: { sourceRootId: sourceRoot.id, path: sourceRoot.path }
+    });
     return sourceRoot;
   }
 
@@ -308,9 +322,6 @@ export class LibraryService {
 
     const estimatedBytes = estimateMapDownloadBytes(preferences.regionIds, preferences.detailId);
     const budgetBytes = request.budgetBytes ?? preferences.budgetBytes;
-    if (estimatedBytes > budgetBytes) {
-      throw new Error(`Selected maps are estimated above the active budget. Raise the budget or choose fewer regions.`);
-    }
 
     const outputDirectory = path.resolve(preferences.outputDirectory || getDefaultMapsDir());
     await fs.mkdir(outputDirectory, { recursive: true });
@@ -331,19 +342,49 @@ export class LibraryService {
       createdAt: new Date().toISOString()
     };
     await this.db.upsertMapDownloadJob(job);
+    this.options.logger?.info('maps', 'Offline map download started.', {
+      operationId: job.id,
+      details: {
+        regions: preferences.regionIds,
+        maxZoom: detail.maxZoom,
+        estimatedBytes,
+        advisoryBudgetBytes: budgetBytes,
+        overAdvisoryBudget: estimatedBytes > budgetBytes,
+        outputDirectory
+      },
+      progress: { current: 0, total: preferences.regionIds.length, percent: 0, phase: 'starting' }
+    });
 
     const scriptPath = findMapScript(this.projectRoot);
     const mapPacks: MapPack[] = [];
     const errors: MapDownloadResult['errors'] = [];
 
-    for (const regionId of preferences.regionIds) {
+    for (const [index, regionId] of preferences.regionIds.entries()) {
       const region = getMapRegion(regionId);
       if (!region) {
         errors.push({ regionId, message: 'Unknown region preset.' });
+        this.options.logger?.error('maps', `Unknown map region preset: ${regionId}.`, {
+          operationId: job.id
+        });
         continue;
       }
 
       const outputPath = path.join(outputDirectory, `${slugFileName(region.label)}_z${detail.maxZoom}.pmtiles`);
+      const progressStart = {
+        current: index,
+        total: preferences.regionIds.length,
+        percent: Math.round((index / preferences.regionIds.length) * 100),
+        phase: `downloading ${region.label}`
+      };
+      this.options.logger?.info('maps', `Downloading ${region.label} at zoom ${detail.maxZoom}.`, {
+        operationId: job.id,
+        details: { outputPath, sourceUrl: preferences.sourceUrl ?? 'latest official daily build' },
+        progress: progressStart
+      });
+      await this.db.upsertMapDownloadJob({
+        ...job,
+        message: `Downloading ${region.label} (${index + 1} of ${preferences.regionIds.length}).`
+      });
       const args = [
         '-NoProfile',
         '-ExecutionPolicy',
@@ -361,10 +402,45 @@ export class LibraryService {
       if (preferences.sourceUrl) args.push('-SourceUrl', preferences.sourceUrl);
 
       try {
-        await runPowerShell(args, this.projectRoot);
+        await runPowerShell(args, this.projectRoot, (line) => {
+          const commandPercent = parseCommandPercent(line);
+          const overallPercent =
+            commandPercent === undefined
+              ? progressStart.percent
+              : Math.round(((index + commandPercent / 100) / preferences.regionIds.length) * 100);
+          this.options.logger?.debug('maps', line, {
+            operationId: job.id,
+            progress: {
+              ...progressStart,
+              percent: overallPercent,
+              phase: `${region.label}: ${line}`.slice(0, 180)
+            }
+          });
+        });
         mapPacks.push(await this.importMapPack(outputPath));
+        this.options.logger?.info('maps', `${region.label} downloaded and validated.`, {
+          operationId: job.id,
+          details: { outputPath },
+          progress: {
+            current: index + 1,
+            total: preferences.regionIds.length,
+            percent: Math.round(((index + 1) / preferences.regionIds.length) * 100),
+            phase: `completed ${region.label}`
+          }
+        });
       } catch (error) {
-        errors.push({ regionId, message: String((error as Error).message ?? error) });
+        const message = String((error as Error).message ?? error);
+        errors.push({ regionId, message });
+        this.options.logger?.error('maps', `${region.label} download failed: ${message}`, {
+          operationId: job.id,
+          details: { outputPath },
+          progress: {
+            current: index + 1,
+            total: preferences.regionIds.length,
+            percent: Math.round(((index + 1) / preferences.regionIds.length) * 100),
+            phase: `failed ${region.label}`
+          }
+        });
       }
     }
 
@@ -378,6 +454,21 @@ export class LibraryService {
       completedAt: new Date().toISOString()
     };
     await this.db.upsertMapDownloadJob(completedJob);
+    const completionOptions = {
+      operationId: job.id,
+      details: { mapPacks: mapPacks.length, errors },
+      progress: {
+        current: preferences.regionIds.length,
+        total: preferences.regionIds.length,
+        percent: 100,
+        phase: errors.length === 0 ? 'completed' : 'completed with errors'
+      }
+    };
+    if (errors.length === 0) {
+      this.options.logger?.info('maps', completedJob.message ?? 'Offline map download finished.', completionOptions);
+    } else {
+      this.options.logger?.error('maps', completedJob.message ?? 'Offline map download finished with errors.', completionOptions);
+    }
 
     return { job: completedJob, mapPacks, errors };
   }
@@ -596,6 +687,16 @@ export class LibraryService {
     }
   }
 
+  private async clearSessionCache(): Promise<void> {
+    try {
+      await this.options.sessionCache?.clear();
+    } catch (error) {
+      this.options.logger?.warn('thumbnails', 'Could not clear the session thumbnail cache.', {
+        details: { message: error instanceof Error ? error.message : String(error) }
+      });
+    }
+  }
+
   private async buildAsset(sourceRoot: SourceRoot, filePath: string, settings: AppSettings): Promise<PhotoAsset> {
     const stat = await fs.stat(filePath);
     const relativePath = normalizeRelativePath(sourceRoot.path, filePath);
@@ -712,21 +813,41 @@ function slugFileName(value: string): string {
     .slice(0, 60) || 'map';
 }
 
-async function runPowerShell(args: string[], cwd: string): Promise<string> {
+function parseCommandPercent(line: string): number | undefined {
+  const match = line.match(/(?:^|\s)(\d{1,3}(?:\.\d+)?)\s*%/);
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return undefined;
+  return Math.min(Math.max(value, 0), 100);
+}
+
+async function runPowerShell(args: string[], cwd: string, onOutput?: (line: string) => void): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn('powershell', args, {
       cwd,
       windowsHide: true
     });
     let output = '';
+    let bufferedLine = '';
+    const capture = (chunk: Buffer | string): void => {
+      const text = chunk.toString();
+      output = `${output}${text}`.slice(-128 * 1024);
+      bufferedLine += text;
+      const lines = bufferedLine.split(/\r\n|\r|\n/);
+      bufferedLine = lines.pop() ?? '';
+      for (const line of lines) {
+        if (line.trim()) onOutput?.(line.trimEnd());
+      }
+    };
     child.stdout.on('data', (chunk) => {
-      output += chunk.toString();
+      capture(chunk);
     });
     child.stderr.on('data', (chunk) => {
-      output += chunk.toString();
+      capture(chunk);
     });
     child.on('error', reject);
     child.on('close', (code) => {
+      if (bufferedLine.trim()) onOutput?.(bufferedLine.trimEnd());
       if (code === 0) {
         resolve(output);
         return;

@@ -12,6 +12,9 @@ $checks = @(
   @{ Name = 'Map scripts'; Path = Join-Path $repoRoot 'scripts\maps.ps1' },
   @{ Name = 'Preload source'; Path = Join-Path $repoRoot 'src\preload\index.ts' },
   @{ Name = 'Renderer API client'; Path = Join-Path $repoRoot 'src\renderer\src\apiClient.ts' },
+  @{ Name = 'Backend server source'; Path = Join-Path $repoRoot 'src\main\services\backend-server.ts' },
+  @{ Name = 'Backend logger source'; Path = Join-Path $repoRoot 'src\main\services\backend-logger.ts' },
+  @{ Name = 'Thumbnail cache source'; Path = Join-Path $repoRoot 'src\main\services\thumbnail-cache.ts' },
   @{ Name = 'Built main process'; Path = Join-Path $repoRoot 'out\main\index.js'; Optional = $true },
   @{ Name = 'Built preload bridge'; Path = Join-Path $repoRoot 'out\preload\index.mjs'; Optional = $true },
   @{ Name = 'Built renderer'; Path = Join-Path $repoRoot 'out\renderer\index.html'; Optional = $true }
@@ -48,3 +51,4 @@ if (Test-Path $mapsDir) {
 
 Write-Host ''
 Write-Host 'Doctor complete. If any build output says NOT BUILT, run Build.cmd or Run.cmd once.'
+Write-Host 'When the app is running, open Maintenance -> Settings to see the backend port and persistent log path.'

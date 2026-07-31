@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import { exiftool } from 'exiftool-vendored';
 import { MetadataFields, emptyMetadata } from '../../shared/types';
 import { normalizeMetadata } from './merge';
@@ -30,6 +31,25 @@ export class ExifToolService {
     } catch {
       return readXmpSidecar(filePath);
     }
+  }
+
+  async extractBestPreview(imageFile: string, destination: string): Promise<boolean> {
+    const extractors = [
+      () => exiftool.extractPreview(imageFile, destination),
+      () => exiftool.extractJpgFromRaw(imageFile, destination),
+      () => exiftool.extractThumbnail(imageFile, destination)
+    ];
+
+    for (const extract of extractors) {
+      await fs.rm(destination, { force: true });
+      try {
+        await extract();
+        return true;
+      } catch {
+        // Camera formats expose different embedded preview tags; try the next one.
+      }
+    }
+    return false;
   }
 
   async end(): Promise<void> {
