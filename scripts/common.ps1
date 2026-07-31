@@ -126,3 +126,74 @@ function Assert-LastExitCode {
   }
 }
 
+function Get-DefaultMapsDir {
+  $documents = [Environment]::GetFolderPath('MyDocuments')
+  if (-not $documents) {
+    $documents = Join-Path $env:USERPROFILE 'Documents'
+  }
+  return Join-Path $documents 'Photo Metadata Manager\Maps'
+}
+
+function Get-ToolsDir {
+  $repoRoot = Get-RepoRoot
+  $toolsDir = Join-Path $repoRoot '.tools'
+  New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+  return $toolsDir
+}
+
+function Get-PmtilesCli {
+  $toolsDir = Get-ToolsDir
+  $pmtilesExe = Join-Path $toolsDir 'pmtiles.exe'
+  if (Test-Path $pmtilesExe) {
+    return (Resolve-Path $pmtilesExe).Path
+  }
+
+  Write-Host ''
+  Write-Host 'Downloading PMTiles CLI...'
+  $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/protomaps/go-pmtiles/releases/latest' -Headers @{ 'User-Agent' = 'metadata-manager-setup' }
+  $asset = $release.assets |
+    Where-Object { $_.name -match 'windows' -and $_.name -match '(amd64|x86_64|x64)' -and $_.name -match '\.zip$' } |
+    Select-Object -First 1
+
+  if (-not $asset) {
+    Start-Process 'https://github.com/protomaps/go-pmtiles/releases'
+    throw 'Could not find a Windows PMTiles CLI asset automatically. Download pmtiles.exe from the releases page and place it in .tools.'
+  }
+
+  $zipPath = Join-Path $toolsDir $asset.name
+  Write-Host "Downloading PMTiles CLI asset: $($asset.browser_download_url)"
+  Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -Headers @{ 'User-Agent' = 'metadata-manager-setup' }
+  Write-Host "PMTiles CLI archive downloaded: $zipPath"
+  Expand-Archive -Path $zipPath -DestinationPath $toolsDir -Force
+  $found = Get-ChildItem -LiteralPath $toolsDir -Recurse -Filter pmtiles.exe -File | Select-Object -First 1
+  if (-not $found) {
+    throw 'Downloaded PMTiles CLI archive did not contain pmtiles.exe.'
+  }
+  $foundPath = [IO.Path]::GetFullPath($found.FullName)
+  $destinationPath = [IO.Path]::GetFullPath($pmtilesExe)
+  if (-not $foundPath.Equals($destinationPath, [StringComparison]::OrdinalIgnoreCase)) {
+    Copy-Item -LiteralPath $foundPath -Destination $destinationPath -Force
+  }
+  return (Resolve-Path $pmtilesExe).Path
+}
+
+function Get-LatestProtomapsBuildUrl {
+  Write-Host ''
+  Write-Host 'Finding an available official Protomaps daily basemap build...'
+  $today = [DateTime]::UtcNow.Date
+  for ($daysAgo = 0; $daysAgo -lt 21; $daysAgo++) {
+    $date = $today.AddDays(-$daysAgo).ToString('yyyyMMdd')
+    $candidate = "https://build.protomaps.com/$date.pmtiles"
+    Write-Host "Checking build: $candidate"
+    try {
+      $response = Invoke-WebRequest -UseBasicParsing -Uri $candidate -Method Head -MaximumRedirection 5 -TimeoutSec 20 -Headers @{ 'User-Agent' = 'photo-metadata-manager' }
+      if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
+        Write-Host "Using official basemap build: $candidate"
+        return $candidate
+      }
+    } catch {
+      Write-Host "Build unavailable: $date"
+    }
+  }
+  throw 'Could not find an available Protomaps daily build from the last 21 days. Open https://maps.protomaps.com/builds, copy a PMTiles URL, and paste it into Source PMTiles URL.'
+}

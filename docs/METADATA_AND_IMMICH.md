@@ -13,6 +13,8 @@ SidecarRoot/
       IMG_0001.jpg.xmp
 ```
 
+`sourceRootId` is derived from the normalized source path. The app can therefore forget source paths at close and still reconnect a folder to its existing mirrored sidecars when that same source is selected again.
+
 This keeps original photo folders untouched.
 
 ## Immich Staging
@@ -66,4 +68,3 @@ GPS coordinates are written in XMP `GPSCoordinate` format, for example:
 - It does not rewrite photo binaries.
 - It does not write sidecars into source folders during normal editing.
 - It does not require internet during normal geotagging after map packs are imported.
-

@@ -2,23 +2,32 @@
 
 ## First Run
 
-1. Launch the app with `Launch.cmd`.
-2. Choose one or more photo source folders.
-3. Choose a sidecar mirror folder.
-4. Optionally import a `.pmtiles` offline map pack.
-5. Scan each source folder.
+1. Launch the app with `Run.cmd`.
+2. Use the left rail in order: Import, Library, Edit, Export.
+3. In Import, choose one folder as the current source. The app scans it and opens Library.
+4. Keep the default sidecar mirror or choose another under Maintenance -> Settings.
+5. Use Maintenance -> Maps for map downloads, installed packs, and active map selection.
 
-## Source Folders
+## Current Source
 
-Source folders are read-only inputs. The app scans supported photo files and reads:
+Import is non-destructive, session-only registration. The app has exactly one current source:
+
+- Choosing a different source clears the previous library view before scanning the new folder.
+- Closing the app forgets the source path and cached photo records.
+- Source photos, mirrored sidecars, map packs, and persistent settings remain on disk.
+- Add Specific Photos registers selected files only when they are inside the current source.
+
+The app scans supported photo files and reads:
 
 - Embedded metadata through `exiftool-vendored`.
 - Adjacent sidecars if they already exist next to the media.
 - Mirror sidecars from the configured sidecar mirror folder.
 
+Library tiles request cached JPEG thumbnails from the localhost backend. Standard photos use Electron's native decoder; supported RAW files fall back to an embedded ExifTool preview. The cache is cleared whenever the current source changes and never writes into the photo source.
+
 ## Editing Metadata
 
-Select one or more photos, then edit:
+Browse photos in the center library, switch between thumbnail/detail view, filter/sort the list, then select one or more photos. The right inspector edits:
 
 - Description
 - Rating
@@ -28,20 +37,36 @@ Select one or more photos, then edit:
 
 Saving writes only to the mirror sidecar folder. Original media files are not modified.
 
+When multiple photos are selected, mixed values are marked. Only fields you change are written to the selected sidecars.
+
+Selection controls:
+
+- Ctrl-click toggles individual photos.
+- Shift-click selects a range from the last selected photo.
+- Ctrl+A selects all filtered photos when the browser has focus.
+- Remove From Library unregisters selected photos from the app without deleting files.
+
+The current-source indicator above the browser shows only the active source. Rescan beside it checks that folder for new or changed photos.
+
 ## Geotagging
 
 With an offline map pack installed:
 
 1. Select a photo or batch of photos.
-2. Click or drag the map pin.
-3. Use Apply Pin.
-4. The coordinates are saved to mirror sidecars.
+2. Open Edit and use the map button in the Metadata panel.
+3. Click or drag the map pin.
+4. Use Apply Pin.
+5. The coordinates are saved to mirror sidecars.
 
 Without a map pack, use the manual latitude and longitude fields.
 
+Map downloading and installed-pack cleanup are not part of the photo workflow. Use Maintenance -> Maps for regions, depth/detail, advisory budget, download output folder, active pack, unregister, and app-managed file deletion. The budget controls only the planning graph and never blocks a download.
+
 ## Batch Editing
 
-When multiple photos are selected, blank fields are left unchanged. Filled fields are applied to every selected photo.
+Batch editing supports description, rating, date/time, GPS, and tags. Mixed fields are left unchanged until you edit them.
+
+GPS accepts manual latitude and longitude, pasted `lat, lon`, or a map pin.
 
 ## Reverting Edits
 
@@ -53,3 +78,14 @@ Use Export Selected or Export All to choose a staging folder. The app creates me
 
 The export tries to hardlink media first. If hardlinking fails, it copies the media file.
 
+## Bridge Health
+
+The startup banner shows whether the Electron preload bridge is connected. If the app is opened as plain HTML in a browser, it shows a clear "Desktop bridge unavailable" screen because file dialogs, scans, sidecar writes, map import, and export require Electron.
+
+## Activity And Help
+
+The docked Activity console shows a terminal-style session log. Every operation has a start line, progress messages, success or failure state, and elapsed time while running. Errors automatically expand the console so failures do not disappear.
+
+For history or deeper troubleshooting, open Maintenance -> Settings -> Backend Console. It shows the localhost port, live logs, crash history, map downloader output, and thumbnail work. Its NDJSON log survives app restart.
+
+Hover buttons, fields, status pills, source indicators, and map controls for a short explanation. Configuration controls are kept under Maintenance, while photo actions stay in Import, Library, Edit, or Export.

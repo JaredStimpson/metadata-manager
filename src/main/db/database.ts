@@ -3,11 +3,14 @@ import path from 'node:path';
 import initSqlJs, { Database, SqlJsStatic, SqlValue } from 'sql.js';
 import {
   AppSettings,
+  AssetSortBy,
+  MapDownloadJob,
   MapPack,
   MetadataFields,
   MetadataSource,
   PhotoAsset,
   SidecarStatus,
+  SortDirection,
   SourceRoot,
   emptyMetadata
 } from '../../shared/types';
@@ -33,6 +36,30 @@ interface AssetRow {
   mirror_sidecar_path?: string;
   adjacent_sidecar_path?: string;
   updated_at: string;
+}
+
+interface MapPackRow {
+  id: string;
+  name: string;
+  path: string;
+  kind: 'pmtiles' | 'places-sqlite';
+  importedAt: string;
+  metadata_json?: string;
+}
+
+interface MapDownloadJobRow {
+  id: string;
+  region_ids_json: string;
+  detail_id: string;
+  max_zoom: number;
+  output_directory: string;
+  source_url?: string;
+  estimated_bytes: number;
+  output_paths_json: string;
+  status: MapDownloadJob['status'];
+  message?: string;
+  created_at: string;
+  completed_at?: string;
 }
 
 export class DatabaseService {
@@ -103,18 +130,80 @@ export class DatabaseService {
   }
 
   listMapPacks(): MapPack[] {
-    return this.select<MapPack>('SELECT * FROM map_packs ORDER BY importedAt DESC');
+    return this.select<MapPackRow>('SELECT * FROM map_packs ORDER BY importedAt DESC').map(mapMapPack);
   }
 
   getMapPack(id: string): MapPack | undefined {
-    return this.selectOne<MapPack>('SELECT * FROM map_packs WHERE id = ?', [id]);
+    const row = this.selectOne<MapPackRow>('SELECT * FROM map_packs WHERE id = ?', [id]);
+    return row ? mapMapPack(row) : undefined;
+  }
+
+  getMapPackByPath(filePath: string): MapPack | undefined {
+    const row = this.selectOne<MapPackRow>('SELECT * FROM map_packs WHERE path = ?', [filePath]);
+    return row ? mapMapPack(row) : undefined;
   }
 
   async addMapPack(mapPack: MapPack): Promise<void> {
     this.run(
-      `INSERT OR REPLACE INTO map_packs (id, name, path, kind, importedAt)
-       VALUES (?, ?, ?, ?, ?)`,
-      [mapPack.id, mapPack.name, mapPack.path, mapPack.kind, mapPack.importedAt]
+      `INSERT OR REPLACE INTO map_packs (id, name, path, kind, importedAt, metadata_json)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        mapPack.id,
+        mapPack.name,
+        mapPack.path,
+        mapPack.kind,
+        mapPack.importedAt,
+        mapPack.metadata ? JSON.stringify(mapPack.metadata) : undefined
+      ]
+    );
+    await this.save();
+  }
+
+  async removeMapPack(id: string): Promise<MapPack | undefined> {
+    const existing = this.getMapPack(id);
+    if (!existing) return undefined;
+    this.run('DELETE FROM map_packs WHERE id = ?', [id]);
+    await this.save();
+    return existing;
+  }
+
+  listMapDownloadJobs(): MapDownloadJob[] {
+    return this.select<MapDownloadJobRow>('SELECT * FROM map_download_jobs ORDER BY created_at DESC LIMIT 20').map(
+      mapMapDownloadJob
+    );
+  }
+
+  async upsertMapDownloadJob(job: MapDownloadJob): Promise<void> {
+    this.run(
+      `INSERT INTO map_download_jobs (
+        id, region_ids_json, detail_id, max_zoom, output_directory, source_url,
+        estimated_bytes, output_paths_json, status, message, created_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        region_ids_json = excluded.region_ids_json,
+        detail_id = excluded.detail_id,
+        max_zoom = excluded.max_zoom,
+        output_directory = excluded.output_directory,
+        source_url = excluded.source_url,
+        estimated_bytes = excluded.estimated_bytes,
+        output_paths_json = excluded.output_paths_json,
+        status = excluded.status,
+        message = excluded.message,
+        completed_at = excluded.completed_at`,
+      [
+        job.id,
+        JSON.stringify(job.regionIds),
+        job.detailId,
+        job.maxZoom,
+        job.outputDirectory,
+        job.sourceUrl,
+        job.estimatedBytes,
+        JSON.stringify(job.outputPaths),
+        job.status,
+        job.message,
+        job.createdAt,
+        job.completedAt
+      ]
     );
     await this.save();
   }
@@ -189,10 +278,51 @@ export class DatabaseService {
     return this.select<AssetRow>(`SELECT * FROM assets WHERE id IN (${placeholders})`, ids).map(mapAsset);
   }
 
+  async deleteAssetsByIds(ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const existing = this.getAssetsByIds(ids);
+    if (existing.length === 0) return 0;
+    const placeholders = ids.map(() => '?').join(',');
+    this.run(`DELETE FROM assets WHERE id IN (${placeholders})`, ids);
+    await this.save();
+    return existing.length;
+  }
+
+  async clearPhotoSession(): Promise<void> {
+    this.run('DELETE FROM edit_history');
+    this.run('DELETE FROM assets');
+    this.run('DELETE FROM source_roots');
+    await this.save();
+  }
+
+  async replacePhotoSessionSource(sourceRoot: SourceRoot): Promise<void> {
+    const db = this.requireDb();
+    db.exec('BEGIN');
+    try {
+      this.run('DELETE FROM edit_history');
+      this.run('DELETE FROM assets');
+      this.run('DELETE FROM source_roots');
+      this.run(
+        'INSERT INTO source_roots (id, path, name, createdAt, lastScanAt) VALUES (?, ?, ?, ?, ?)',
+        [sourceRoot.id, sourceRoot.path, sourceRoot.name, sourceRoot.createdAt, sourceRoot.lastScanAt]
+      );
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    await this.save();
+  }
+
   listAssets(options: {
     text?: string;
     sourceRootId?: string;
-    filter?: 'all' | 'missing-location' | 'edited' | 'conflicts';
+    filter?: 'all' | 'missing-location' | 'has-location' | 'edited' | 'conflicts';
+    sortBy?: AssetSortBy;
+    sortDirection?: SortDirection;
+    rating?: number;
+    tag?: string;
+    extension?: string;
     limit?: number;
   } = {}): PhotoAsset[] {
     const where: string[] = [];
@@ -209,14 +339,30 @@ export class DatabaseService {
     if (options.filter === 'missing-location') {
       where.push("(json_extract(effective_json, '$.latitude') IS NULL OR json_extract(effective_json, '$.longitude') IS NULL)");
     }
+    if (options.filter === 'has-location') {
+      where.push("(json_extract(effective_json, '$.latitude') IS NOT NULL AND json_extract(effective_json, '$.longitude') IS NOT NULL)");
+    }
     if (options.filter === 'edited') {
       where.push("sidecar_status = 'mirror'");
     }
     if (options.filter === 'conflicts') {
       where.push("sidecar_status = 'conflict'");
     }
+    if (options.rating !== undefined) {
+      where.push("json_extract(effective_json, '$.rating') = ?");
+      values.push(options.rating);
+    }
+    if (options.tag) {
+      where.push("effective_json LIKE ?");
+      values.push(`%"${escapeLike(options.tag)}"%`);
+    }
+    if (options.extension) {
+      where.push('extension = ?');
+      values.push(options.extension.toLowerCase());
+    }
 
-    const sql = `SELECT * FROM assets ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY relative_path ASC LIMIT ?`;
+    const orderBy = orderByForAssets(options.sortBy, options.sortDirection);
+    const sql = `SELECT * FROM assets ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY ${orderBy} LIMIT ?`;
     values.push(options.limit ?? 500);
     return this.select<AssetRow>(sql, values).map(mapAsset);
   }
@@ -266,7 +412,23 @@ export class DatabaseService {
         name TEXT NOT NULL,
         path TEXT NOT NULL UNIQUE,
         kind TEXT NOT NULL,
-        importedAt TEXT NOT NULL
+        importedAt TEXT NOT NULL,
+        metadata_json TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS map_download_jobs (
+        id TEXT PRIMARY KEY,
+        region_ids_json TEXT NOT NULL,
+        detail_id TEXT NOT NULL,
+        max_zoom INTEGER NOT NULL,
+        output_directory TEXT NOT NULL,
+        source_url TEXT,
+        estimated_bytes INTEGER NOT NULL,
+        output_paths_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        message TEXT,
+        created_at TEXT NOT NULL,
+        completed_at TEXT
       );
 
       CREATE TABLE IF NOT EXISTS assets (
@@ -311,6 +473,14 @@ export class DatabaseService {
         created_at TEXT NOT NULL
       );
     `);
+
+    this.ensureColumn('map_packs', 'metadata_json', 'TEXT');
+  }
+
+  private ensureColumn(table: string, column: string, declaration: string): void {
+    const existing = this.select<{ name: string }>(`PRAGMA table_info(${table})`);
+    if (existing.some((row) => row.name === column)) return;
+    this.requireDb().exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);
   }
 
   private run(sql: string, values: unknown[] = []): void {
@@ -355,6 +525,32 @@ function toSqlValues(values: unknown[]): SqlValue[] {
   });
 }
 
+function orderByForAssets(sortBy: AssetSortBy = 'filename', direction: SortDirection = 'asc'): string {
+  const dir = direction === 'desc' ? 'DESC' : 'ASC';
+  const nulls = direction === 'desc' ? 'NULLS LAST' : 'NULLS FIRST';
+  switch (sortBy) {
+    case 'date':
+      return `json_extract(effective_json, '$.dateTimeOriginal') ${dir} ${nulls}, filename ASC`;
+    case 'rating':
+      return `json_extract(effective_json, '$.rating') ${dir} ${nulls}, filename ASC`;
+    case 'location':
+      return `json_extract(effective_json, '$.latitude') ${dir} ${nulls}, filename ASC`;
+    case 'edited':
+      return `sidecar_status ${dir}, updated_at DESC`;
+    case 'fileType':
+      return `extension ${dir}, filename ASC`;
+    case 'updated':
+      return `updated_at ${dir}, filename ASC`;
+    case 'filename':
+    default:
+      return `filename ${dir}, relative_path ASC`;
+  }
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[%_]/g, '');
+}
+
 function mapAsset(row: AssetRow): PhotoAsset {
   return {
     id: row.id,
@@ -379,10 +575,56 @@ function mapAsset(row: AssetRow): PhotoAsset {
   };
 }
 
+function mapMapPack(row: MapPackRow): MapPack {
+  return {
+    id: row.id,
+    name: row.name,
+    path: row.path,
+    kind: row.kind,
+    importedAt: row.importedAt,
+    metadata: row.metadata_json ? parseMapPackMetadata(row.metadata_json) : undefined
+  };
+}
+
+function mapMapDownloadJob(row: MapDownloadJobRow): MapDownloadJob {
+  return {
+    id: row.id,
+    regionIds: parseStringArray(row.region_ids_json),
+    detailId: row.detail_id,
+    maxZoom: row.max_zoom,
+    outputDirectory: row.output_directory,
+    sourceUrl: row.source_url,
+    estimatedBytes: row.estimated_bytes,
+    outputPaths: parseStringArray(row.output_paths_json),
+    status: row.status,
+    message: row.message,
+    createdAt: row.created_at,
+    completedAt: row.completed_at
+  };
+}
+
 function parseMetadata(value: string): MetadataFields {
   try {
     return metadataFromUnknown(JSON.parse(value));
   } catch {
     return emptyMetadata();
+  }
+}
+
+function parseMapPackMetadata(value: string): MapPack['metadata'] {
+  try {
+    const parsed = JSON.parse(value) as MapPack['metadata'];
+    return parsed && typeof parsed === 'object' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseStringArray(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
   }
 }
