@@ -10,6 +10,9 @@ $checks = @(
   @{ Name = 'Electron launcher'; Path = Join-Path $repoRoot 'Run.cmd' },
   @{ Name = 'Map setup launcher'; Path = Join-Path $repoRoot 'MapSetup.cmd' },
   @{ Name = 'Map scripts'; Path = Join-Path $repoRoot 'scripts\maps.ps1' },
+  @{ Name = 'Windows package config'; Path = Join-Path $repoRoot 'electron-builder.yml' },
+  @{ Name = 'Windows application icon'; Path = Join-Path $repoRoot 'build\icon.ico' },
+  @{ Name = 'PMTiles runtime preparer'; Path = Join-Path $repoRoot 'scripts\prepare-runtime.ps1' },
   @{ Name = 'Preload source'; Path = Join-Path $repoRoot 'src\preload\index.ts' },
   @{ Name = 'Renderer API client'; Path = Join-Path $repoRoot 'src\renderer\src\apiClient.ts' },
   @{ Name = 'Backend server source'; Path = Join-Path $repoRoot 'src\main\services\backend-server.ts' },
@@ -17,7 +20,10 @@ $checks = @(
   @{ Name = 'Thumbnail cache source'; Path = Join-Path $repoRoot 'src\main\services\thumbnail-cache.ts' },
   @{ Name = 'Built main process'; Path = Join-Path $repoRoot 'out\main\index.js'; Optional = $true },
   @{ Name = 'Built preload bridge'; Path = Join-Path $repoRoot 'out\preload\index.mjs'; Optional = $true },
-  @{ Name = 'Built renderer'; Path = Join-Path $repoRoot 'out\renderer\index.html'; Optional = $true }
+  @{ Name = 'Built renderer'; Path = Join-Path $repoRoot 'out\renderer\index.html'; Optional = $true },
+  @{ Name = 'Bundled PMTiles runtime'; Path = Join-Path $repoRoot 'runtime-tools\pmtiles.exe'; Optional = $true },
+  @{ Name = 'Windows installer'; Path = Join-Path $repoRoot 'release\Photo-Meta-Setup-0.1.0-x64.exe'; Optional = $true },
+  @{ Name = 'Portable executable'; Path = Join-Path $repoRoot 'release\Photo-Meta-Portable-0.1.0-x64.exe'; Optional = $true }
 )
 
 Write-Host ''
@@ -50,5 +56,5 @@ if (Test-Path $mapsDir) {
 }
 
 Write-Host ''
-Write-Host 'Doctor complete. If any build output says NOT BUILT, run Build.cmd or Run.cmd once.'
+Write-Host 'Doctor complete. Use Bundle.cmd for out\ only, or Build.cmd for installer and portable EXEs.'
 Write-Host 'When the app is running, open Maintenance -> Settings to see the backend port and persistent log path.'

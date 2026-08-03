@@ -32,6 +32,8 @@ import {
 import {
   AppSettings,
   ExportResult,
+  FirstRunSetup,
+  InitialState,
   ImportFilesResult,
   LocalPlace,
   MapDownloadJob,
@@ -40,6 +42,7 @@ import {
   MapDownloadRequest,
   MapDownloadResult,
   MapPack,
+  MapLibraryScanResult,
   MapPackMetadata,
   MetadataFields,
   MetadataPatch,
@@ -53,12 +56,20 @@ import {
 
 interface LibraryServiceOptions {
   logger?: BackendLogger;
+  defaultSidecarRoot?: string;
+  defaultMapsDirectory?: string;
+  sqlWasmPath?: string;
+  pmtilesExecutable?: string;
   sessionCache?: {
     clear(): Promise<void>;
   };
 }
 
 export class LibraryService {
+  private mapWatcher?: fsSync.FSWatcher;
+  private mapWatcherTimer?: NodeJS.Timeout;
+  private mapLibraryListener?: (result: MapLibraryScanResult) => void;
+
   constructor(
     private readonly db: DatabaseService,
     private readonly exiftool: ExifToolService,
@@ -76,7 +87,53 @@ export class LibraryService {
       }
       settings.sidecarRoot = resolved;
     }
+    const current = this.db.getSettings();
+    const nextSidecar = settings.sidecarRoot ?? current.sidecarRoot;
+    const nextMaps =
+      settings.mapDownloadPreferences?.outputDirectory ??
+      current.mapDownloadPreferences?.outputDirectory ??
+      this.getManagedMapsDirectory();
+    if (nextSidecar && nextMaps) assertSeparateWritableFolders(nextSidecar, nextMaps);
+    if (settings.showMapLabels === undefined && current.showMapLabels === undefined) settings.showMapLabels = true;
     return this.db.updateSettings(settings);
+  }
+
+  getFirstRunDefaults(): FirstRunSetup {
+    const settings = this.db.getSettings();
+    return {
+      sidecarRoot: settings.sidecarRoot ?? this.options.defaultSidecarRoot ?? getDefaultSidecarDir(),
+      mapDirectory:
+        settings.mapDownloadPreferences?.outputDirectory ??
+        this.options.defaultMapsDirectory ??
+        getDefaultMapsDir()
+    };
+  }
+
+  async completeFirstRunSetup(setup: FirstRunSetup, tileServerUrl?: string): Promise<InitialState> {
+    const sidecarRoot = path.resolve(setup.sidecarRoot);
+    const mapDirectory = path.resolve(setup.mapDirectory);
+    assertSeparateWritableFolders(sidecarRoot, mapDirectory);
+    for (const sourceRoot of this.db.listSourceRoots()) {
+      assertSourceSeparated(sourceRoot.path, sidecarRoot, mapDirectory);
+    }
+    await createWritableFolders([sidecarRoot, mapDirectory]);
+    const existing = normalizeMapDownloadPreferences(
+      this.db.getSettings().mapDownloadPreferences ?? defaultMapDownloadPreferences()
+    );
+    await this.db.updateSettings({
+      sidecarRoot,
+      firstRunCompleted: true,
+      showMapLabels: this.db.getSettings().showMapLabels ?? true,
+      mapDownloadPreferences: { ...existing, outputDirectory: mapDirectory }
+    });
+    await this.rescanMapLibrary();
+    return {
+      settings: this.db.getSettings(),
+      sourceRoots: this.db.listSourceRoots(),
+      mapPacks: this.db.listMapPacks(),
+      tileServerUrl,
+      firstRunDefaults: this.getFirstRunDefaults()
+    };
   }
 
   async clearPhotoSession(): Promise<void> {
@@ -88,12 +145,7 @@ export class LibraryService {
   async setSourceRoot(rootPath: string): Promise<SourceRoot> {
     const settings = this.db.getSettings();
     const resolved = path.resolve(rootPath);
-    if (
-      settings.sidecarRoot &&
-      (isSameOrChildPath(resolved, settings.sidecarRoot) || isSameOrChildPath(settings.sidecarRoot, resolved))
-    ) {
-      throw new Error('Choose a photo source that is separate from the sidecar mirror folder.');
-    }
+    assertSourceSeparated(resolved, settings.sidecarRoot, this.getManagedMapsDirectory());
 
     const stat = await fs.stat(resolved);
     if (!stat.isDirectory()) throw new Error('The current source must be a readable folder.');
@@ -259,7 +311,10 @@ export class LibraryService {
     return updated;
   }
 
-  async importMapPack(filePath: string): Promise<MapPack> {
+  async importMapPack(
+    filePath: string,
+    requestedOrigin?: MapPack['origin']
+  ): Promise<MapPack> {
     const resolved = path.resolve(filePath);
     const stat = await fs.stat(resolved);
     if (!stat.isFile()) throw new Error('Map pack must be a file.');
@@ -274,12 +329,18 @@ export class LibraryService {
       throw new Error('The map panel supports vector PMTiles basemaps. Choose a vector .pmtiles file.');
     }
 
+    const managedDirectory = this.getManagedMapsDirectory();
+    const origin = requestedOrigin ?? (isDirectChild(managedDirectory, resolved) ? 'managed' : 'imported');
+    const now = new Date().toISOString();
     const mapPack: MapPack = {
       id: existing?.id ?? crypto.randomUUID(),
       name: path.basename(resolved),
       path: resolved,
       kind,
       importedAt: existing?.importedAt ?? new Date().toISOString(),
+      origin: existing?.origin === 'downloaded' ? 'downloaded' : origin,
+      availability: 'available',
+      lastSeenAt: now,
       metadata
     };
 
@@ -288,6 +349,112 @@ export class LibraryService {
       await this.db.updateSettings({ activeMapPackId: mapPack.id });
     }
     return mapPack;
+  }
+
+  async rescanMapLibrary(): Promise<MapLibraryScanResult> {
+    const directory = this.getManagedMapsDirectory();
+    await fs.mkdir(directory, { recursive: true });
+    const before = this.db.listMapPacks();
+    const beforeByPath = new Map(before.map((pack) => [normalizeFsPath(pack.path), pack]));
+    const seen = new Set<string>();
+    const errors: MapLibraryScanResult['errors'] = [];
+    let added = 0;
+    let updated = 0;
+
+    const entries = await fs.readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.pmtiles') continue;
+      const filePath = path.join(directory, entry.name);
+      const key = normalizeFsPath(filePath);
+      seen.add(key);
+      try {
+        const existing = beforeByPath.get(key);
+        await this.importMapPack(filePath, existing?.origin === 'downloaded' ? 'downloaded' : 'managed');
+        if (existing) updated += 1;
+        else added += 1;
+      } catch (error) {
+        const message = String((error as Error).message ?? error);
+        errors.push({ path: filePath, message });
+        const existing = beforeByPath.get(key);
+        if (existing) {
+          await this.db.addMapPack({
+            ...existing,
+            origin: existing.origin === 'downloaded' ? 'downloaded' : 'managed',
+            availability: 'missing'
+          });
+        }
+        this.options.logger?.warn('maps', `Ignored invalid managed map ${entry.name}: ${message}`, {
+          details: { path: filePath }
+        });
+      }
+    }
+
+    let missing = 0;
+    for (const pack of before) {
+      if (pack.kind !== 'pmtiles' || !isDirectChild(directory, pack.path)) continue;
+      if (seen.has(normalizeFsPath(pack.path))) continue;
+      missing += 1;
+      await this.db.addMapPack({
+        ...pack,
+        origin: pack.origin === 'imported' ? 'managed' : pack.origin,
+        availability: 'missing'
+      });
+    }
+
+    for (const pack of before) {
+      if (pack.origin !== 'imported' || isDirectChild(directory, pack.path)) continue;
+      try {
+        const stat = await fs.stat(pack.path);
+        if (!stat.isFile()) throw new Error('Registered map path is not a file.');
+        if (pack.availability === 'missing') await this.importMapPack(pack.path, 'imported');
+      } catch (error) {
+        missing += 1;
+        await this.db.addMapPack({ ...pack, availability: 'missing' });
+        this.options.logger?.warn('maps', `Registered external pack is unavailable: ${pack.name}.`, {
+          details: { path: pack.path, message: String((error as Error).message ?? error) }
+        });
+      }
+    }
+
+    let settings = this.db.getSettings();
+    const active = settings.activeMapPackId ? this.db.getMapPack(settings.activeMapPackId) : undefined;
+    if (active?.availability === 'missing') settings = await this.db.updateSettings({ activeMapPackId: undefined });
+    const result = { mapPacks: this.db.listMapPacks(), added, updated, missing, errors, settings };
+    this.mapLibraryListener?.(result);
+    this.options.logger?.info('maps', 'Managed map library scan completed.', {
+      details: { directory, added, updated, missing, errors: errors.length }
+    });
+    return result;
+  }
+
+  async startMapLibraryWatcher(listener?: (result: MapLibraryScanResult) => void): Promise<void> {
+    this.mapLibraryListener = listener ?? this.mapLibraryListener;
+    this.stopMapLibraryWatcher();
+    const directory = this.getManagedMapsDirectory();
+    await fs.mkdir(directory, { recursive: true });
+    this.mapWatcher = fsSync.watch(directory, { persistent: false }, () => {
+      if (this.mapWatcherTimer) clearTimeout(this.mapWatcherTimer);
+      this.mapWatcherTimer = setTimeout(() => {
+        void this.rescanMapLibrary().catch((error) => {
+          this.options.logger?.error('maps', `Managed map watcher scan failed: ${String((error as Error).message ?? error)}`);
+        });
+      }, 650);
+    });
+  }
+
+  stopMapLibraryWatcher(): void {
+    if (this.mapWatcherTimer) clearTimeout(this.mapWatcherTimer);
+    this.mapWatcherTimer = undefined;
+    this.mapWatcher?.close();
+    this.mapWatcher = undefined;
+  }
+
+  private getManagedMapsDirectory(): string {
+    return path.resolve(
+      this.db.getSettings().mapDownloadPreferences?.outputDirectory ||
+        this.options.defaultMapsDirectory ||
+        getDefaultMapsDir()
+    );
   }
 
   getMapDownloadPlan(): MapDownloadPlan {
@@ -304,14 +471,26 @@ export class LibraryService {
       overBudget: estimatedBytes > preferences.budgetBytes,
       installedPacks: this.db.listMapPacks().filter((pack) => pack.kind === 'pmtiles'),
       jobs: this.db.listMapDownloadJobs(),
-      defaultOutputDirectory: getDefaultMapsDir()
+      defaultOutputDirectory: this.options.defaultMapsDirectory ?? getDefaultMapsDir()
     };
   }
 
   async saveMapDownloadPreferences(preferences: MapDownloadPreferences): Promise<MapDownloadPlan> {
     const normalized = normalizeMapDownloadPreferences(preferences);
     normalized.outputDirectory = normalized.outputDirectory ? path.resolve(normalized.outputDirectory) : undefined;
+    const previousDirectory = this.getManagedMapsDirectory();
+    const nextDirectory = normalized.outputDirectory ?? previousDirectory;
+    const settings = this.db.getSettings();
+    if (settings.sidecarRoot) assertSeparateWritableFolders(settings.sidecarRoot, nextDirectory);
+    for (const sourceRoot of this.db.listSourceRoots()) {
+      assertSourceSeparated(sourceRoot.path, settings.sidecarRoot, nextDirectory);
+    }
+    await fs.mkdir(nextDirectory, { recursive: true });
     await this.db.updateSettings({ mapDownloadPreferences: normalized });
+    if (normalizeFsPath(previousDirectory) !== normalizeFsPath(nextDirectory)) {
+      await this.rescanMapLibrary();
+      await this.startMapLibraryWatcher(this.mapLibraryListener);
+    }
     return this.getMapDownloadPlan();
   }
 
@@ -323,9 +502,16 @@ export class LibraryService {
     const estimatedBytes = estimateMapDownloadBytes(preferences.regionIds, preferences.detailId);
     const budgetBytes = request.budgetBytes ?? preferences.budgetBytes;
 
-    const outputDirectory = path.resolve(preferences.outputDirectory || getDefaultMapsDir());
+    const outputDirectory = path.resolve(
+      preferences.outputDirectory || this.options.defaultMapsDirectory || getDefaultMapsDir()
+    );
     await fs.mkdir(outputDirectory, { recursive: true });
     await this.saveMapDownloadPreferences({ ...preferences, outputDirectory, budgetBytes });
+    const pmtilesExecutable = this.options.pmtilesExecutable;
+    if (!pmtilesExecutable || !fsSync.existsSync(pmtilesExecutable)) {
+      throw new Error('The bundled PMTiles engine is unavailable. Run Doctor.cmd or reinstall Photo Meta.');
+    }
+    const sourceUrl = preferences.sourceUrl || (await findLatestProtomapsBuildUrl());
 
     const job: MapDownloadJob = {
       id: crypto.randomUUID(),
@@ -333,7 +519,7 @@ export class LibraryService {
       detailId: preferences.detailId,
       maxZoom: detail.maxZoom,
       outputDirectory,
-      sourceUrl: preferences.sourceUrl,
+      sourceUrl,
       estimatedBytes,
       outputPaths: preferences.regionIds.map((regionId) =>
         path.join(outputDirectory, `${slugFileName(getMapRegion(regionId)?.label ?? regionId)}_z${detail.maxZoom}.pmtiles`)
@@ -355,7 +541,6 @@ export class LibraryService {
       progress: { current: 0, total: preferences.regionIds.length, percent: 0, phase: 'starting' }
     });
 
-    const scriptPath = findMapScript(this.projectRoot);
     const mapPacks: MapPack[] = [];
     const errors: MapDownloadResult['errors'] = [];
 
@@ -385,24 +570,11 @@ export class LibraryService {
         ...job,
         message: `Downloading ${region.label} (${index + 1} of ${preferences.regionIds.length}).`
       });
-      const args = [
-        '-NoProfile',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-File',
-        scriptPath,
-        '-Mode',
-        region.bbox ? 'Custom' : 'Starter',
-        '-MaxZoom',
-        String(detail.maxZoom),
-        '-Output',
-        outputPath
-      ];
-      if (region.bbox) args.push('-Bbox', region.bbox.join(','));
-      if (preferences.sourceUrl) args.push('-SourceUrl', preferences.sourceUrl);
+      const args = ['extract', sourceUrl, outputPath, `--maxzoom=${detail.maxZoom}`];
+      if (region.bbox) args.push(`--bbox=${region.bbox.join(',')}`);
 
       try {
-        await runPowerShell(args, this.projectRoot, (line) => {
+        await runCommand(pmtilesExecutable, args, this.projectRoot, (line) => {
           const commandPercent = parseCommandPercent(line);
           const overallPercent =
             commandPercent === undefined
@@ -417,7 +589,7 @@ export class LibraryService {
             }
           });
         });
-        mapPacks.push(await this.importMapPack(outputPath));
+        mapPacks.push(await this.importMapPack(outputPath, 'downloaded'));
         this.options.logger?.info('maps', `${region.label} downloaded and validated.`, {
           operationId: job.id,
           details: { outputPath },
@@ -484,7 +656,7 @@ export class LibraryService {
       };
     }
 
-    const defaultMapsDir = getDefaultMapsDir();
+    const defaultMapsDir = this.getManagedMapsDirectory();
     if (deleteFile && !isSameOrChildPath(defaultMapsDir, mapPack.path)) {
       throw new Error('Only map files in the app maps folder can be deleted from here. Unregister imported files instead.');
     }
@@ -522,9 +694,9 @@ export class LibraryService {
     const text = query.trim();
     if (text.length < 2) return [];
 
-    const placePacks = this.db.listMapPacks().filter((pack) => pack.kind === 'places-sqlite');
+    const placePacks = this.db.listMapPacks().filter((pack) => pack.kind === 'places-sqlite' && pack.availability === 'available');
     const SQL = await initSqlJs({
-      locateFile: (file) => path.join(process.cwd(), 'node_modules/sql.js/dist', file)
+      locateFile: (file) => this.options.sqlWasmPath ?? path.join(process.cwd(), 'node_modules/sql.js/dist', file)
     });
     const results: LocalPlace[] = [];
 
@@ -571,7 +743,7 @@ export class LibraryService {
 
   private async inspectPlacesPack(filePath: string): Promise<MapPackMetadata> {
     const SQL = await initSqlJs({
-      locateFile: (file) => path.join(process.cwd(), 'node_modules/sql.js/dist', file)
+      locateFile: (file) => this.options.sqlWasmPath ?? path.join(process.cwd(), 'node_modules/sql.js/dist', file)
     });
     const db = new SQL.Database(await fs.readFile(filePath));
     try {
@@ -789,20 +961,60 @@ function isSameOrChildPath(parent: string, child: string): boolean {
   return childPath === parentPath || childPath.startsWith(`${parentPath}${path.sep}`);
 }
 
+function isDirectChild(parent: string, child: string): boolean {
+  return normalizeFsPath(path.dirname(child)) === normalizeFsPath(parent);
+}
+
+function assertSeparateWritableFolders(first: string, second: string): void {
+  if (isSameOrChildPath(first, second) || isSameOrChildPath(second, first)) {
+    throw new Error('The sidecar mirror and managed maps folders must be separate and cannot contain each other.');
+  }
+}
+
+function assertSourceSeparated(source: string, sidecar?: string, maps?: string): void {
+  if (sidecar && (isSameOrChildPath(source, sidecar) || isSameOrChildPath(sidecar, source))) {
+    throw new Error('Choose a photo source that is separate from the sidecar mirror folder.');
+  }
+  if (maps && (isSameOrChildPath(source, maps) || isSameOrChildPath(maps, source))) {
+    throw new Error('Choose a photo source that is separate from the managed maps folder.');
+  }
+}
+
+async function createWritableFolders(folders: string[]): Promise<void> {
+  const created: string[] = [];
+  try {
+    for (const folder of folders) {
+      try {
+        const stat = await fs.stat(folder);
+        if (!stat.isDirectory()) throw new Error(`${folder} is not a folder.`);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        await fs.mkdir(folder, { recursive: true });
+        created.push(folder);
+      }
+      const probe = path.join(folder, `.photo-meta-write-test-${crypto.randomUUID()}`);
+      await fs.writeFile(probe, 'ok');
+      await fs.unlink(probe);
+    }
+  } catch (error) {
+    for (const folder of created.reverse()) {
+      try {
+        await fs.rmdir(folder);
+      } catch {
+        // Leave non-empty parent folders intact.
+      }
+    }
+    throw new Error(`Could not prepare the writable folders: ${String((error as Error).message ?? error)}`);
+  }
+}
+
+function getDefaultSidecarDir(): string {
+  return path.join(os.homedir(), 'Documents', 'Photo Metadata Manager', 'Sidecars');
+}
+
 function getDefaultMapsDir(): string {
   const documents = path.join(os.homedir(), 'Documents');
   return path.join(documents, 'Photo Metadata Manager', 'Maps');
-}
-
-function findMapScript(projectRoot: string): string {
-  const candidates = [
-    path.join(projectRoot, 'scripts', 'maps.ps1'),
-    path.join(process.cwd(), 'scripts', 'maps.ps1')
-  ];
-  for (const candidate of candidates) {
-    if (fsSync.existsSync(candidate)) return candidate;
-  }
-  return candidates[0];
 }
 
 function slugFileName(value: string): string {
@@ -821,9 +1033,14 @@ function parseCommandPercent(line: string): number | undefined {
   return Math.min(Math.max(value, 0), 100);
 }
 
-async function runPowerShell(args: string[], cwd: string, onOutput?: (line: string) => void): Promise<string> {
+async function runCommand(
+  executable: string,
+  args: string[],
+  cwd: string,
+  onOutput?: (line: string) => void
+): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn('powershell', args, {
+    const child = spawn(executable, args, {
       cwd,
       windowsHide: true
     });
@@ -852,7 +1069,28 @@ async function runPowerShell(args: string[], cwd: string, onOutput?: (line: stri
         resolve(output);
         return;
       }
-      reject(new Error(output.trim() || `PowerShell exited with code ${code ?? 'unknown'}.`));
+      reject(new Error(output.trim() || `PMTiles exited with code ${code ?? 'unknown'}.`));
     });
   });
+}
+
+async function findLatestProtomapsBuildUrl(): Promise<string> {
+  const today = new Date();
+  for (let daysAgo = 0; daysAgo < 21; daysAgo += 1) {
+    const date = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - daysAgo));
+    const stamp = date.toISOString().slice(0, 10).replace(/-/g, '');
+    const candidate = `https://build.protomaps.com/${stamp}.pmtiles`;
+    try {
+      const response = await fetch(candidate, {
+        method: 'HEAD',
+        redirect: 'follow',
+        signal: AbortSignal.timeout(20_000),
+        headers: { 'User-Agent': 'photo-metadata-manager' }
+      });
+      if (response.ok) return candidate;
+    } catch {
+      // Daily builds are not guaranteed; continue through the recent window.
+    }
+  }
+  throw new Error('No official Protomaps daily build was available from the last 21 days. Paste a source URL in Maps and try again.');
 }

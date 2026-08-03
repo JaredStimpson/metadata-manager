@@ -2,6 +2,7 @@ import {
   AppSettings,
   AssetQuery,
   BackendLogEntry,
+  FirstRunSetup,
   HealthStatus,
   ImportFilesResult,
   MapDownloadPreferences,
@@ -9,6 +10,7 @@ import {
   MapDownloadResult,
   MapDownloadPlan,
   MapPack,
+  MapLibraryScanResult,
   MetadataPatch,
   PhotoAsset,
   PhotoMetadataApi,
@@ -46,6 +48,8 @@ export const apiClient = {
   chooseDirectory: (title?: string) => call('Choose folder', (api) => api.chooseDirectory(title)),
   chooseMapPack: () => call('Choose map pack', (api) => api.chooseMapPack()),
   updateSettings: (settings: Partial<AppSettings>) => call('Update settings', (api) => api.updateSettings(settings)),
+  completeFirstRunSetup: (setup: FirstRunSetup) =>
+    call('Complete first-run setup', (api) => api.completeFirstRunSetup(setup)),
   setSourceRoot: (path: string) => call('Set current photo source', (api) => api.setSourceRoot(path)),
   addImportedFiles: (paths: string[]) => call('Register photo files', (api) => api.addImportedFiles(paths)),
   removeAssetsFromLibrary: (assetIds: string[]) =>
@@ -55,6 +59,7 @@ export const apiClient = {
   saveMetadata: (assetIds: string[], patch: MetadataPatch) => call('Save metadata', (api) => api.saveMetadata(assetIds, patch)),
   revertSidecars: (assetIds: string[]) => call('Revert sidecars', (api) => api.revertSidecars(assetIds)),
   importMapPack: (path: string) => call('Import map pack', (api) => api.importMapPack(path)),
+  rescanMapLibrary: () => call('Rescan managed map library', (api) => api.rescanMapLibrary()),
   getMapDownloadPlan: () => call('Load map download plan', (api) => api.getMapDownloadPlan()),
   saveMapDownloadPreferences: (preferences: MapDownloadPreferences) =>
     call('Save map download preferences', (api) => api.saveMapDownloadPreferences(preferences)),
@@ -72,6 +77,11 @@ export const apiClient = {
     const bridge = getOptionalBridge();
     if (!bridge) throw new DesktopBridgeUnavailableError();
     bridge.onBackendLog(listener);
+  },
+  onMapLibraryChanged: (listener: (result: MapLibraryScanResult) => void): void => {
+    const bridge = getOptionalBridge();
+    if (!bridge) throw new DesktopBridgeUnavailableError();
+    bridge.onMapLibraryChanged(listener);
   }
 };
 

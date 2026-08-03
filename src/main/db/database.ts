@@ -44,6 +44,9 @@ interface MapPackRow {
   path: string;
   kind: 'pmtiles' | 'places-sqlite';
   importedAt: string;
+  origin?: MapPack['origin'];
+  availability?: MapPack['availability'];
+  lastSeenAt?: string;
   metadata_json?: string;
 }
 
@@ -67,13 +70,13 @@ export class DatabaseService {
   private db?: Database;
   private readonly filePath: string;
 
-  constructor(userDataPath: string) {
+  constructor(userDataPath: string, private readonly sqlWasmPath?: string) {
     this.filePath = path.join(userDataPath, 'photo-metadata-manager.sqlite');
   }
 
   async init(): Promise<void> {
     this.SQL = await initSqlJs({
-      locateFile: (file) => path.join(process.cwd(), 'node_modules/sql.js/dist', file)
+      locateFile: (file) => this.sqlWasmPath ?? path.join(process.cwd(), 'node_modules/sql.js/dist', file)
     });
 
     try {
@@ -145,14 +148,18 @@ export class DatabaseService {
 
   async addMapPack(mapPack: MapPack): Promise<void> {
     this.run(
-      `INSERT OR REPLACE INTO map_packs (id, name, path, kind, importedAt, metadata_json)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO map_packs (
+        id, name, path, kind, importedAt, origin, availability, lastSeenAt, metadata_json
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         mapPack.id,
         mapPack.name,
         mapPack.path,
         mapPack.kind,
         mapPack.importedAt,
+        mapPack.origin,
+        mapPack.availability,
+        mapPack.lastSeenAt,
         mapPack.metadata ? JSON.stringify(mapPack.metadata) : undefined
       ]
     );
@@ -475,6 +482,9 @@ export class DatabaseService {
     `);
 
     this.ensureColumn('map_packs', 'metadata_json', 'TEXT');
+    this.ensureColumn('map_packs', 'origin', "TEXT NOT NULL DEFAULT 'imported'");
+    this.ensureColumn('map_packs', 'availability', "TEXT NOT NULL DEFAULT 'available'");
+    this.ensureColumn('map_packs', 'lastSeenAt', 'TEXT');
   }
 
   private ensureColumn(table: string, column: string, declaration: string): void {
@@ -582,6 +592,9 @@ function mapMapPack(row: MapPackRow): MapPack {
     path: row.path,
     kind: row.kind,
     importedAt: row.importedAt,
+    origin: row.origin ?? 'imported',
+    availability: row.availability ?? 'available',
+    lastSeenAt: row.lastSeenAt,
     metadata: row.metadata_json ? parseMapPackMetadata(row.metadata_json) : undefined
   };
 }

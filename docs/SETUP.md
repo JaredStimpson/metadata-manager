@@ -26,15 +26,24 @@ If any `.cmd` wrapper fails, it prints the exit code and waits for a key press b
 
 This starts the Electron development app with hot reload.
 
+On first launch, Photo Meta offers default folders under `Documents\Photo Metadata Manager` for mirrored sidecars and managed maps. Use **Use Defaults** for the simplest setup, or choose either folder. The app creates and write-tests both folders together and rejects overlapping locations.
+
 After launch, Maintenance -> Settings shows the local backend port and persistent log path. The default backend URL is `http://127.0.0.1:43821`; if that port is occupied, the app chooses an available localhost port and displays it there.
 
-## Build
+## Windows Packages
 
 ```powershell
 .\Build.cmd
 ```
 
-Build output is written to `out/`.
+`Build.cmd` verifies the app, fetches pinned PMTiles CLI `v1.31.2`, verifies the release SHA-256 digest, and builds:
+
+- `release\Photo-Meta-Setup-<version>-x64.exe`
+- `release\Photo-Meta-Portable-<version>-x64.exe`
+
+The assisted installer allows choosing the installation directory and creates Start menu/Desktop shortcuts plus an uninstaller. Packages are currently unsigned, so SmartScreen may ask for confirmation.
+
+For a developer bundle only, run `Bundle.cmd`. That writes `out/` and does not package an EXE.
 
 ## Verify
 
@@ -81,7 +90,8 @@ The generated app bundles in `out/` can also be deleted safely.
 .\MapSetup.cmd   # create an offline PMTiles map file
 .\Doctor.cmd     # check common local setup problems
 .\Verify.cmd     # typecheck, test, and build
-.\Build.cmd      # build production bundles only
+.\Bundle.cmd     # build developer bundles into out\
+.\Build.cmd      # verify and build installer plus portable EXEs
 ```
 
 `Setup.cmd` and `Launch.cmd` remain as aliases for `Install.cmd` and `Run.cmd`.

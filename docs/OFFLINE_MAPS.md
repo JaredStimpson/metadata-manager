@@ -9,8 +9,8 @@ Use Maintenance -> Maps in the app for the normal path:
 - Pick one or more regions.
 - Pick a detail level.
 - Keep the default 5 GB planning target or adjust it. This is advisory and never blocks a download.
-- Choose the output folder if needed.
-- Download selected regions while online. The app downloads the Windows PMTiles CLI when needed, finds an available official Protomaps daily build, then uses HTTP range requests to extract each selected region.
+- Choose the managed Maps folder if needed. It is also available under Maintenance -> Settings.
+- Download selected regions while online. Installed builds spawn the bundled PMTiles CLI directly, find an available official Protomaps daily build, then use HTTP range requests to extract each region. Node, pnpm, PowerShell, and separate PMTiles setup are not required.
 - Watch current status in the bottom Activity panel. Open Maintenance -> Settings -> Backend Console for the full live subprocess log and exact failures.
 - Use installed packs offline later.
 
@@ -26,7 +26,7 @@ It offers:
 - `2` for a custom area map.
 - `3` to open the official Protomaps download docs and a bounding-box helper.
 
-When the script finishes, launch the app and import the generated `.pmtiles` file with Import Pack.
+When the script finishes, place the generated `.pmtiles` file directly in the managed Maps folder or use Import Pack.
 
 ## Path 2: Download On The Web, Then Import
 
@@ -39,8 +39,9 @@ You can keep map acquisition completely separate from the app:
 pmtiles extract "PASTE_DAILY_BUILD_URL_HERE" "my-region.pmtiles" --bbox=-124.7,32.0,-113.8,42.2 --maxzoom=10
 ```
 
-3. In the app, open Maintenance -> Maps -> Import Pack.
-4. Select the downloaded or extracted `.pmtiles` file and click Use.
+3. Copy it into the managed Maps folder. The app discovers direct children at startup, whenever Maps opens, after folder changes, through Rescan, and through a debounced filesystem watcher.
+4. Alternatively, use Import Pack to keep a file outside the managed folder registered independently.
+5. Select the pack and click Use.
 
 The full daily planet build is very large, so downloading a regional pack or using `pmtiles extract` is usually the practical route. The official [Protomaps download guide](https://docs.protomaps.com/basemaps/downloads) explains build size and extraction tradeoffs.
 
@@ -52,6 +53,14 @@ The full daily planet build is very large, so downloading a regional pack or usi
 4. Select it as the active map pack in Installed Packs.
 
 The app runs a localhost-only tile server so MapLibre can request byte ranges from the local file. The renderer never receives broad filesystem access.
+
+Missing packs remain visible as unavailable so the path can be diagnosed. Restoring a managed file makes it usable again on the next watcher event or Rescan. Raster PMTiles are rejected because their baked-in labels cannot be toggled separately.
+
+## Offline Labels
+
+Labels are enabled by default and persisted globally. Protomaps and common vector schemas are labeled automatically using Windows Segoe UI, with no glyph server or internet request. The Labels checkbox hides or shows every compatible text symbol layer without modifying the PMTiles archive.
+
+For another vector schema, place `map.pmtiles.style.json` or `map.style.json` beside `map.pmtiles`. The style must be MapLibre style version 8. Photo Meta remaps declared layers to the selected offline source, rejects undeclared source layers, removes remote resources and icon dependencies, and retains offline-compatible text layers. A malformed or unsupported style is logged and the pack remains available without labels.
 
 ## Normal Offline Use
 

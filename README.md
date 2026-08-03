@@ -6,15 +6,16 @@ The app opens one photo source per session, reads embedded metadata and existing
 
 ## Quick Start on Windows
 
-From a fresh clone:
+For a normal user, download either `Photo-Meta-Setup-<version>-x64.exe` or the portable EXE from `release/`. The installer adds shortcuts and an uninstaller; portable runs without installation. Both include the map engine and require no Node, pnpm, or PowerShell.
+
+From a source checkout:
 
 ```powershell
 .\Install.cmd
-.\MapSetup.cmd
 .\Run.cmd
 ```
 
-The `.cmd` files are the beginner path. They call the PowerShell scripts with the right execution policy and do not require knowing Node, pnpm, Electron, or PMTiles.
+The `.cmd` files are the beginner developer path. Installed builds handle map downloads inside the app.
 
 If a `.cmd` script fails, the terminal window stays open and waits for a key press so the error message is visible.
 
@@ -23,7 +24,9 @@ If a `.cmd` script fails, the terminal window stays open and waits for a key pre
 - Scans one current photo source in read-only mode and forgets its path when the app closes.
 - Writes metadata edits to a separate mirrored XMP sidecar library.
 - Supports Immich-compatible sidecar fields: description, rating, date/time, GPS latitude/longitude, and tags.
-- Imports offline `.pmtiles` map packs for MapLibre-based geotagging.
+- Watches a managed Maps folder and automatically validates copied vector `.pmtiles` packs.
+- Renders offline labels from Protomaps/common schemas or a sanitized companion style JSON.
+- Expands the geotag map to half the workspace without losing metadata edits or map state.
 - Generates and caches real photo thumbnails, including embedded RAW previews when available.
 - Supports manual coordinate entry when no map pack is installed.
 - Supports optional offline place search from a local SQLite place pack.
@@ -81,7 +84,7 @@ The normal setup path is inside the app:
 5. Follow live progress in Activity or Maintenance -> Settings -> Open Console.
 6. Use the downloaded pack in Edit -> Geotag Map.
 
-Existing vector `.pmtiles` files can be registered with the import button in Installed Packs.
+Existing vector `.pmtiles` files can be copied into the managed Maps folder or registered externally with the import button. Use Rescan immediately or leave Maps open; the filesystem watcher updates the list automatically.
 
 The budget never blocks a download. `MapSetup.cmd` remains a fallback and a map downloaded in a web browser can be registered with Import Pack. See [Offline Maps](docs/OFFLINE_MAPS.md) for both complete routes. Manual latitude/longitude entry works before a map is installed.
 
@@ -96,8 +99,10 @@ Sidecar storage and desktop diagnostics live under Maintenance -> Settings. The 
 ## Requirements
 
 - Windows 10/11 for the easiest path.
-- Node.js 20.18 or newer if you are outside the Codex workspace.
-- pnpm 11.x, or Corepack with pnpm available.
+- Windows 10/11 x64 for packaged builds.
+- Node.js 20.18 and pnpm 11.x only when developing from source.
+
+The initial Windows executables are unsigned. Windows SmartScreen may show an "unrecognized app" warning; verify the artifact came from this project, choose More info, then Run anyway.
 
 Inside the Codex workspace, the setup scripts automatically use the bundled Node runtime when it exists.
 
@@ -108,3 +113,4 @@ Inside the Codex workspace, the setup scripts automatically use the bundled Node
 - [Metadata and Immich Compatibility](docs/METADATA_AND_IMMICH.md)
 - [Offline Maps](docs/OFFLINE_MAPS.md)
 - [Development](docs/DEVELOPMENT.md)
+- [Windows Packaging](docs/PACKAGING.md)

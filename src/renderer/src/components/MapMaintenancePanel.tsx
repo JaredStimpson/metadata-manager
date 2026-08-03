@@ -4,6 +4,7 @@ import {
   ExternalLink,
   FolderOpen,
   Map,
+  RefreshCw,
   Settings,
   Trash2
 } from 'lucide-react';
@@ -31,6 +32,7 @@ interface MapMaintenancePanelProps {
   onOpenDocs(): void;
   onSetActiveMapPack(id: string): void;
   onRemoveMapPack(id: string, deleteFile: boolean): void;
+  onRescan(): void;
 }
 
 export function MapMaintenancePanel({
@@ -47,7 +49,8 @@ export function MapMaintenancePanel({
   onOpenMapSetup,
   onOpenDocs,
   onSetActiveMapPack,
-  onRemoveMapPack
+  onRemoveMapPack,
+  onRescan
 }: MapMaintenancePanelProps): JSX.Element {
   const detail = getMapDetail(draft.detailId);
   const estimateBytes = estimateMapDownloadBytes(draft.regionIds, draft.detailId);
@@ -211,11 +214,12 @@ export function MapMaintenancePanel({
           <div className="panel-title">
             <div>
               <h2>Installed Packs</h2>
-              <span>{installedPacks.length} ready for offline use</span>
+              <span>{installedPacks.filter((pack) => pack.availability === 'available').length} ready for offline use</span>
             </div>
-            <button onClick={onImportPack} title="Register an existing vector PMTiles or offline place-search SQLite pack">
-              <Map size={16} />
-            </button>
+            <div className="panel-title-actions">
+              <button onClick={onRescan} title="Rescan the managed maps folder"><RefreshCw size={16} /></button>
+              <button onClick={onImportPack} title="Register an existing vector PMTiles or offline place-search SQLite pack"><Map size={16} /></button>
+            </div>
           </div>
           <div className="installed-map-list">
             {installedPacks.length === 0 ? (
@@ -226,15 +230,15 @@ export function MapMaintenancePanel({
               </div>
             ) : (
               installedPacks.map((pack) => (
-                <div key={pack.id} className={settings.activeMapPackId === pack.id ? 'installed-map active' : 'installed-map'}>
+                <div key={pack.id} className={`${settings.activeMapPackId === pack.id ? 'installed-map active' : 'installed-map'} ${pack.availability}`}>
                   <div>
                     <strong>{pack.name}</strong>
                     <span>{mapPackDetail(pack)}</span>
-                    <small title={pack.path}>{pack.path}</small>
+                    <small title={pack.path}>{pack.availability === 'missing' ? 'Missing / ' : ''}{pack.origin} / {pack.path}</small>
                   </div>
                   <div className="installed-map-actions">
                     <button
-                      disabled={settings.activeMapPackId === pack.id}
+                      disabled={settings.activeMapPackId === pack.id || pack.availability === 'missing'}
                       onClick={() => onSetActiveMapPack(pack.id)}
                       title="Use this PMTiles pack in the geotag editor"
                     >
@@ -246,7 +250,7 @@ export function MapMaintenancePanel({
                     >
                       Unregister
                     </button>
-                    <button onClick={() => onRemoveMapPack(pack.id, true)} title="Delete this app-managed map file from disk and unregister it">
+                    <button disabled={pack.origin === 'imported' || pack.availability === 'missing'} onClick={() => onRemoveMapPack(pack.id, true)} title="Delete this app-managed map file from disk and unregister it">
                       <Trash2 size={15} />
                     </button>
                   </div>
@@ -305,5 +309,6 @@ function mapPackDetail(pack: MapPack): string {
     const [minLon, minLat, maxLon, maxLat] = pack.metadata.bounds;
     parts.push(`${minLat.toFixed(1)}, ${minLon.toFixed(1)} to ${maxLat.toFixed(1)}, ${maxLon.toFixed(1)}`);
   }
+  if (pack.metadata?.labelMode && pack.metadata.labelMode !== 'none') parts.push(`${pack.metadata.labelMode} labels`);
   return parts.join(' / ') || 'PMTiles';
 }

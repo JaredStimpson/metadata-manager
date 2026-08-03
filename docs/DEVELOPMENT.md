@@ -37,6 +37,9 @@ docs/
 - Backend logs are appended as NDJSON under Electron `userData/logs/backend.ndjson` and loaded on restart.
 - Renderer crashes are captured by main-process crash hooks. A synchronous crash-log write protects the final error from queued asynchronous work.
 - Main-process IPC validates imported map packs before storing them.
+- Managed-map discovery scans direct children and uses a debounced `fs.watch`; registrations track origin, availability, last-seen time, vector layers, label mode, and companion style status.
+- MapLibre 5.11+ uses local Segoe UI glyph rendering. Styles never require a remote glyph URL.
+- `RuntimePaths` resolves SQL.js WASM and bundled tools for development, ASAR, NSIS, and portable layouts instead of assuming `process.cwd()`.
 - Map downloads are modeled as a Maintenance feature with persistent preferences and download jobs.
 - Map subprocess stdout and stderr stream into the backend log. Carriage-return progress updates are handled and the retained error buffer is bounded.
 - Photo sources and scanned assets are session-only and are cleared during main-process startup.
@@ -57,6 +60,7 @@ The Electron main process owns:
 - XMP sidecar reads and writes.
 - SQLite persistence.
 - PMTiles byte-range serving.
+- Managed map discovery, watcher lifecycle, PMTiles metadata inspection, and native CLI downloads.
 - Persistent operational logging and localhost diagnostics.
 - Cached JPEG thumbnail generation, with embedded RAW preview fallback.
 - Immich staging export.
@@ -117,6 +121,9 @@ Focused unit tests cover:
 - Batch metadata patch generation.
 - Map download catalog defaults and estimates.
 - PMTiles rejection behavior.
+- First-run folder creation and overlap safety.
+- Managed-map missing state and active selection cleanup.
+- Common-schema offline labels and custom style sanitization.
 - XMP generation.
 - GPS conversion.
 - XMP parsing.
@@ -124,6 +131,8 @@ Focused unit tests cover:
 - Mirror sidecar paths.
 - Immich staging sidecar naming.
 
-## Release Notes
+## Packaging
 
-This repository currently builds unpackaged Electron bundles into `out/`. A future packaging step can add `electron-builder` or a similar packager once installer/update preferences are clear.
+`Bundle.cmd` creates `out/` only. `Build.cmd` runs verification, prepares the pinned/checksummed PMTiles runtime, and invokes electron-builder for x64 assisted NSIS and portable targets. SQL.js WASM and ExifTool executable resources are unpacked from ASAR; `pmtiles.exe` is installed under `resources/bin`.
+
+See [Windows Packaging](PACKAGING.md) for artifact names, runtime layout, and unsigned-release notes.

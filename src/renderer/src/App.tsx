@@ -14,6 +14,8 @@ import {
   LocateFixed,
   Map,
   MapPinned,
+  Maximize2,
+  Minimize2,
   RefreshCw,
   RotateCcw,
   Save,
@@ -28,6 +30,7 @@ import {
 } from 'lucide-react';
 import { MapPanel } from './components/MapPanel';
 import { MapMaintenancePanel } from './components/MapMaintenancePanel';
+import { FirstRunSetup } from './components/FirstRunSetup';
 import {
   ActivityConsole,
   ActivityEntry,
@@ -51,6 +54,8 @@ import {
   BackendProgress,
   HealthStatus,
   InitialState,
+  FirstRunDefaults,
+  FirstRunSetup as FirstRunSetupValue,
   LocalPlace,
   MapDownloadPlan,
   MapDownloadPreferences,
@@ -123,6 +128,8 @@ export function App(): JSX.Element {
   const [browserView, setBrowserView] = useState<BrowserView>('thumbnail');
   const [activeStep, setActiveStep] = useState<AppArea>('import');
   const [mapOpen, setMapOpen] = useState(false);
+  const [mapExpanded, setMapExpanded] = useState(false);
+  const [firstRunDefaults, setFirstRunDefaults] = useState<FirstRunDefaults>();
   const [activityCollapsed, setActivityCollapsed] = useState(false);
   const [activityEntries, setActivityEntries] = useState<ActivityEntry[]>([]);
   const [runningActivities, setRunningActivities] = useState<RunningActivity[]>([]);
@@ -162,6 +169,21 @@ export function App(): JSX.Element {
     }
     void loadInitial();
   }, [bridgeAvailable]);
+
+  useEffect(() => {
+    if (!bridgeAvailable) return;
+    apiClient.onMapLibraryChanged((result) => {
+      setMapPacks(result.mapPacks);
+      setSettings(result.settings);
+      void apiClient.getMapDownloadPlan().then(applyMapPlan);
+      if (result.errors.length) setNotice(`Map library updated with ${result.errors.length} invalid file${result.errors.length === 1 ? '' : 's'} skipped.`);
+    });
+  }, [bridgeAvailable]);
+
+  useEffect(() => {
+    if (!initialized || activeStep !== 'maps') return;
+    void rescanMapLibrary(false);
+  }, [activeStep, initialized]);
 
   useEffect(() => {
     if (!bridgeAvailable) return;
@@ -226,6 +248,17 @@ export function App(): JSX.Element {
     setSourceRoots(state.sourceRoots);
     setMapPacks(state.mapPacks);
     setTileServerUrl(state.tileServerUrl);
+    setFirstRunDefaults(state.firstRunDefaults);
+  }
+
+  async function completeFirstRun(setup: FirstRunSetupValue): Promise<void> {
+    await runTask('Create local libraries', async (progress) => {
+      progress('Validating that sidecars and maps are separate writable folders.');
+      const state = await apiClient.completeFirstRunSetup(setup);
+      applyInitialState(state);
+      applyMapPlan(await apiClient.getMapDownloadPlan());
+      setNotice('Local libraries are ready. Choose a photo source for this session.');
+    });
   }
 
   function applyMapPlan(plan: MapDownloadPlan): void {
@@ -343,6 +376,19 @@ export function App(): JSX.Element {
     });
   }
 
+  async function rescanMapLibrary(showNotice = true): Promise<void> {
+    await runTask('Rescan map library', async (progress) => {
+      progress('Checking direct children of the managed maps folder.');
+      const result = await apiClient.rescanMapLibrary();
+      setMapPacks(result.mapPacks);
+      setSettings(result.settings);
+      applyMapPlan(await apiClient.getMapDownloadPlan());
+      if (showNotice) {
+        setNotice(`Map scan complete: ${result.added} added, ${result.missing} missing, ${result.errors.length} invalid.`);
+      }
+    });
+  }
+
   async function openMapSetup(): Promise<void> {
     await runTask('Open MapSetup.cmd', async () => {
       await apiClient.openMapSetup();
@@ -367,6 +413,23 @@ export function App(): JSX.Element {
     const path = await runTask('Choose map output folder', () => apiClient.chooseDirectory('Choose Offline Map Download Folder'));
     if (!path) return;
     setMapDraft((current) => ({ ...current, outputDirectory: path }));
+  }
+
+  async function chooseManagedMapDirectory(): Promise<void> {
+    const selected = await runTask('Choose managed maps folder', () => apiClient.chooseDirectory('Choose Managed Maps Folder'));
+    if (!selected) return;
+    await runTask('Change managed maps folder', async (progress) => {
+      progress('Validating the folder and scanning PMTiles files.');
+      const plan = await apiClient.saveMapDownloadPreferences({ ...mapDraft, outputDirectory: selected });
+      applyMapPlan(plan);
+      await rescanMapLibrary(false);
+      setNotice('Managed maps folder changed and rescanned.');
+    });
+  }
+
+  async function setShowMapLabels(showMapLabels: boolean): Promise<void> {
+    const next = await apiClient.updateSettings({ showMapLabels });
+    setSettings(next);
   }
 
   async function saveMapPreferences(): Promise<void> {
@@ -676,12 +739,24 @@ export function App(): JSX.Element {
     return <BridgeUnavailable />;
   }
 
+  if (initialized && !settings.firstRunCompleted && firstRunDefaults) {
+    return (
+      <FirstRunSetup
+        defaults={firstRunDefaults}
+        busy={busy}
+        onChooseFolder={(title) => apiClient.chooseDirectory(title)}
+        onComplete={completeFirstRun}
+      />
+    );
+  }
+
   return (
     <div
       className={[
         'workflow-shell',
         activeStep === 'edit' ? 'editor-open' : '',
         activeStep === 'edit' && mapOpen ? 'map-open' : '',
+        activeStep === 'edit' && mapOpen && mapExpanded ? 'map-expanded' : '',
         activityCollapsed ? 'activity-collapsed' : 'activity-open'
       ]
         .filter(Boolean)
@@ -786,6 +861,7 @@ export function App(): JSX.Element {
             onOpenDocs={openMapGuide}
             onSetActiveMapPack={setActiveMapPack}
             onRemoveMapPack={removeMapPack}
+            onRescan={() => rescanMapLibrary()}
           />
         ) : activeStep === 'settings' ? (
           <SettingsMaintenance
@@ -794,6 +870,8 @@ export function App(): JSX.Element {
             currentSource={currentSource}
             busy={busy}
             onChooseSidecarRoot={chooseSidecarRoot}
+            mapDirectory={mapDraft.outputDirectory ?? mapPlan?.defaultOutputDirectory}
+            onChooseMapDirectory={chooseManagedMapDirectory}
             onOpenBackendConsole={openBackendConsole}
             onRevealBackendLog={revealBackendLog}
           />
@@ -1249,9 +1327,14 @@ export function App(): JSX.Element {
                 <h2>Geotag Map</h2>
                 <span>{activeMapPack ? activeMapPack.name : 'Manual coordinates available'}</span>
               </div>
-              <button onClick={() => setMapOpen(false)} title="Close the geotag map">
-                <X size={16} />
-              </button>
+              <div className="panel-title-actions">
+                <button onClick={() => setMapExpanded((current) => !current)} title={mapExpanded ? 'Restore the metadata editor' : 'Expand map to half the workspace'}>
+                  {mapExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                </button>
+                <button onClick={() => { setMapOpen(false); setMapExpanded(false); }} title="Close the geotag map">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             {!activeMapPack && (
@@ -1277,7 +1360,7 @@ export function App(): JSX.Element {
               >
                 <option value="">No map pack</option>
                 {mapPacks
-                  .filter((pack) => pack.kind === 'pmtiles')
+                  .filter((pack) => pack.kind === 'pmtiles' && pack.availability === 'available')
                   .map((pack) => (
                     <option key={pack.id} value={pack.id}>
                       {pack.name}
@@ -1287,6 +1370,17 @@ export function App(): JSX.Element {
             </label>
 
             {activeMapPack && <div className="map-pack-summary">{mapPackSummary(activeMapPack)}</div>}
+
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={settings.showMapLabels !== false}
+                disabled={!activeMapPack || activeMapPack.metadata?.labelMode === 'none'}
+                onChange={(event) => setShowMapLabels(event.target.checked)}
+              />
+              <span>Labels</span>
+              {activeMapPack?.metadata?.labelMode === 'none' && <small>Labels unavailable for this pack</small>}
+            </label>
 
             <div className="map-status-grid">
               <SetupItem ok={Boolean(tileServerUrl)} title="Tile server" detail={tileServerUrl ?? 'Not running'} />
@@ -1298,6 +1392,8 @@ export function App(): JSX.Element {
               mapPacks={mapPacks}
               tileServerUrl={tileServerUrl}
               selectedAsset={selectedAsset}
+              expanded={mapExpanded}
+              showLabels={settings.showMapLabels !== false}
               onSearchPlaces={searchPlaces}
               onApplyLocation={applyLocation}
             />
@@ -1333,6 +1429,8 @@ function SettingsMaintenance({
   currentSource,
   busy,
   onChooseSidecarRoot,
+  mapDirectory,
+  onChooseMapDirectory,
   onOpenBackendConsole,
   onRevealBackendLog
 }: {
@@ -1341,6 +1439,8 @@ function SettingsMaintenance({
   currentSource?: SourceRoot;
   busy?: string;
   onChooseSidecarRoot(): void;
+  mapDirectory?: string;
+  onChooseMapDirectory(): void;
   onOpenBackendConsole(): void;
   onRevealBackendLog(): void;
 }): JSX.Element {
@@ -1388,6 +1488,28 @@ function SettingsMaintenance({
               title="Reveal the persistent NDJSON backend log in File Explorer"
             >
               <FolderOpen size={16} /> Reveal Log
+            </button>
+          </div>
+        </section>
+
+        <section className="maintenance-panel">
+          <div className="panel-title">
+            <div>
+              <h2>Managed Maps</h2>
+              <span>Watched offline PMTiles library</span>
+            </div>
+            <Map size={17} />
+          </div>
+          <p className="panel-copy">
+            Vector PMTiles copied directly into this folder are validated and registered automatically.
+          </p>
+          <label>
+            Current managed maps folder
+            <input value={mapDirectory ?? ''} readOnly />
+          </label>
+          <div className="button-row">
+            <button className="primary" disabled={Boolean(busy)} onClick={onChooseMapDirectory}>
+              <FolderOpen size={16} /> Choose Maps Folder
             </button>
           </div>
         </section>

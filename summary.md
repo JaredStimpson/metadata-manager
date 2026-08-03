@@ -1,6 +1,6 @@
 # Photo Metadata Manager Development Summary
 
-Updated: 2026-07-30
+Updated: 2026-08-02
 
 ## Current Product
 
@@ -17,16 +17,16 @@ The primary workflow is:
 
 ## Latest Changes
 
-- Added a localhost diagnostic backend, normally at `http://127.0.0.1:43821`.
-- Added a browser-based backend console with live and historical logs.
-- Added persistent NDJSON logs for startup, IPC, map downloads, thumbnails, and crashes.
-- Added real cached photo thumbnails with embedded RAW preview fallback.
-- Added live map downloader output and progress to the backend and Activity console.
-- Fixed Protomaps daily-build discovery and PMTiles CLI installation.
-- Made the 5 GB map budget an advisory planning target instead of a download blocker.
-- Documented both in-app map downloading and browser-download/import workflows.
-- Reworked the visual design into a compact terminal-workstation theme.
-- Expanded Settings with backend health, port, console, log path, tile server, bridge, and source-safety information.
+- Added first-run setup for separate mirrored sidecar and managed map libraries, with safe defaults and overlap/write validation.
+- Added direct-child managed PMTiles discovery at startup, Maps open, folder changes, manual Rescan, and debounced filesystem watcher events.
+- Map registrations now retain origin, availability, last-seen time, vector-layer fields, label mode, and companion style diagnostics.
+- Added default-on offline labels for Protomaps/common schemas using MapLibre 5.11 local Segoe UI rendering without glyph network requests.
+- Added sanitized `map.pmtiles.style.json` and `map.style.json` support for arbitrary vector schemas.
+- Added a half-workspace geotag map mode that preserves camera, pin, selected pack, search results, and mounted metadata form state.
+- Replaced app-side PowerShell map downloads with direct backend execution of bundled `pmtiles.exe`.
+- Added packaged runtime path resolution for SQL.js WASM and bundled tools.
+- Added assisted x64 NSIS and portable builds with branded icon, shortcuts, uninstall support, and unsigned-release guidance.
+- Added `Bundle.cmd` for developer-only `out/` builds; `Build.cmd` now emits distributable Windows EXEs.
 
 ## Backend And Logs
 
@@ -60,7 +60,7 @@ Two supported acquisition paths are available:
 1. Maintenance -> Maps downloads selected regions using the PMTiles CLI and an official Protomaps daily build.
 2. A compatible vector `.pmtiles` file can be downloaded separately and registered with Import Pack.
 
-The app streams PowerShell and PMTiles CLI output into persistent logs. Native carriage-return progress updates are handled so long extractions no longer appear inactive.
+The app streams PMTiles CLI output into persistent logs. Installed builds use `resources/bin/pmtiles.exe` and need no development toolchain.
 
 The download path was tested with a real zoom-0 extraction from the 20260730 Protomaps build. It completed using five HTTP requests, transferred about 67 KB, and produced a valid PMTiles archive.
 
@@ -90,12 +90,14 @@ The command wrappers pause on failure so errors remain visible when launched by 
 The latest release passed:
 
 - `tsc --noEmit`
-- 28 Vitest tests across 9 test files
+- 38 Vitest tests across 10 test files
 - `electron-vite build`
-- All `Doctor.cmd` checks
-- Live Electron bridge and backend health checks
-- Live cached thumbnail generation
-- Real Protomaps network extraction
+- Pinned PMTiles v1.31.2 download with official SHA-256 verification
+- `Photo-Meta-Setup-0.1.0-x64.exe` NSIS build
+- `Photo-Meta-Portable-0.1.0-x64.exe` portable build
+- Packaged Electron startup with development Node/pnpm removed from `PATH`
+- Packaged preload health check, SQLite initialization, renderer load, and first-run state
+- Final portable EXE self-extraction, renderer connection, and SQLite creation with development tools absent from `PATH`
 
 ## Git State
 

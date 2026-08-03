@@ -153,6 +153,69 @@ describe('library import safety', () => {
     expect(plan.overBudget).toBe(false);
     expect(library.getMapDownloadPlan().preferences.outputDirectory).toBe(path.join(tempDir, 'Maps'));
   });
+
+  it('creates separate first-run libraries and persists label defaults', async () => {
+    const sidecars = path.join(tempDir, 'AppData', 'Sidecars');
+    const maps = path.join(tempDir, 'AppData', 'Maps');
+
+    const state = await library.completeFirstRunSetup({ sidecarRoot: sidecars, mapDirectory: maps });
+
+    expect(state.settings).toMatchObject({ sidecarRoot: sidecars, firstRunCompleted: true, showMapLabels: true });
+    expect(state.settings.mapDownloadPreferences?.outputDirectory).toBe(maps);
+    expect((await fs.stat(sidecars)).isDirectory()).toBe(true);
+    expect((await fs.stat(maps)).isDirectory()).toBe(true);
+  });
+
+  it('uses existing persistent folders as first-run migration defaults', async () => {
+    const sidecars = path.join(tempDir, 'ExistingSidecars');
+    const maps = path.join(tempDir, 'ExistingMaps');
+    await db.updateSettings({
+      sidecarRoot: sidecars,
+      mapDownloadPreferences: { regionIds: ['world-overview'], detailId: 'travel', budgetBytes: 1024, outputDirectory: maps }
+    });
+
+    expect(library.getFirstRunDefaults()).toEqual({ sidecarRoot: sidecars, mapDirectory: maps });
+  });
+
+  it('rejects overlapping first-run writable folders', async () => {
+    const appData = path.join(tempDir, 'AppData');
+    await expect(
+      library.completeFirstRunSetup({ sidecarRoot: appData, mapDirectory: path.join(appData, 'Maps') })
+    ).rejects.toThrow(/must be separate/);
+  });
+
+  it('rejects a photo source that contains the managed maps folder', async () => {
+    const photos = path.join(tempDir, 'Photos');
+    await fs.mkdir(path.join(photos, 'Maps'), { recursive: true });
+    await library.saveMapDownloadPreferences({
+      regionIds: ['world-overview'],
+      detailId: 'travel',
+      budgetBytes: 1024,
+      outputDirectory: path.join(photos, 'Maps')
+    });
+
+    await expect(library.setSourceRoot(photos)).rejects.toThrow(/separate from the managed maps folder/);
+  });
+
+  it('marks missing managed packs unavailable and clears the active selection', async () => {
+    const maps = path.join(tempDir, 'Maps');
+    await library.saveMapDownloadPreferences({
+      regionIds: ['world-overview'], detailId: 'travel', budgetBytes: 1024, outputDirectory: maps
+    });
+    const missingPath = path.join(maps, 'missing.pmtiles');
+    await db.addMapPack({
+      id: 'managed-map', name: 'missing.pmtiles', path: missingPath, kind: 'pmtiles',
+      importedAt: '2026-01-01T00:00:00.000Z', origin: 'imported', availability: 'available'
+    });
+    await db.updateSettings({ activeMapPackId: 'managed-map' });
+
+    const result = await library.rescanMapLibrary();
+
+    expect(result.missing).toBe(1);
+    expect(result.mapPacks[0].availability).toBe('missing');
+    expect(result.mapPacks[0].origin).toBe('managed');
+    expect(result.settings.activeMapPackId).toBeUndefined();
+  });
 });
 
 async function createRoot(tempDir: string, db: DatabaseService, name: string): Promise<SourceRoot> {

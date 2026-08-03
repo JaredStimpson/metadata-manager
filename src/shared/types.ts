@@ -34,8 +34,20 @@ export interface MapPack {
   path: string;
   kind: 'pmtiles' | 'places-sqlite';
   importedAt: string;
+  origin: 'imported' | 'managed' | 'downloaded';
+  availability: 'available' | 'missing';
+  lastSeenAt?: string;
   metadata?: MapPackMetadata;
 }
+
+export interface MapVectorLayerMetadata {
+  id: string;
+  fields: string[];
+  minZoom?: number;
+  maxZoom?: number;
+}
+
+export type MapLabelMode = 'protomaps' | 'common' | 'custom-style' | 'none';
 
 export interface MapPackMetadata {
   sizeBytes?: number;
@@ -49,12 +61,35 @@ export interface MapPackMetadata {
   };
   tileType?: 'mvt' | 'png' | 'jpeg' | 'webp' | 'avif' | 'unknown';
   placesCount?: number;
+  vectorLayers?: MapVectorLayerMetadata[];
+  labelMode?: MapLabelMode;
+  customStylePath?: string;
+  customStyleLayers?: Array<Record<string, unknown>>;
+  styleWarnings?: string[];
 }
 
 export interface AppSettings {
   sidecarRoot?: string;
   activeMapPackId?: string;
   mapDownloadPreferences?: MapDownloadPreferences;
+  firstRunCompleted?: boolean;
+  showMapLabels?: boolean;
+}
+
+export interface FirstRunSetup {
+  sidecarRoot: string;
+  mapDirectory: string;
+}
+
+export interface FirstRunDefaults extends FirstRunSetup {}
+
+export interface MapLibraryScanResult {
+  mapPacks: MapPack[];
+  added: number;
+  updated: number;
+  missing: number;
+  errors: Array<{ path: string; message: string }>;
+  settings: AppSettings;
 }
 
 export interface MapRegionPreset {
@@ -162,6 +197,7 @@ export interface InitialState {
   sourceRoots: SourceRoot[];
   mapPacks: MapPack[];
   tileServerUrl?: string;
+  firstRunDefaults: FirstRunDefaults;
 }
 
 export interface HealthStatus {
@@ -261,6 +297,7 @@ export interface PhotoMetadataApi {
   chooseDirectory(title?: string): Promise<string | undefined>;
   chooseMapPack(): Promise<string | undefined>;
   updateSettings(settings: Partial<AppSettings>): Promise<AppSettings>;
+  completeFirstRunSetup(setup: FirstRunSetup): Promise<InitialState>;
   setSourceRoot(path: string): Promise<SourceRoot>;
   addImportedFiles(paths: string[]): Promise<ImportFilesResult>;
   removeAssetsFromLibrary(assetIds: string[]): Promise<RemoveAssetsResult>;
@@ -269,6 +306,7 @@ export interface PhotoMetadataApi {
   saveMetadata(assetIds: string[], patch: MetadataPatch): Promise<SaveMetadataResult>;
   revertSidecars(assetIds: string[]): Promise<PhotoAsset[]>;
   importMapPack(path: string): Promise<MapPack>;
+  rescanMapLibrary(): Promise<MapLibraryScanResult>;
   getMapDownloadPlan(): Promise<MapDownloadPlan>;
   saveMapDownloadPreferences(preferences: MapDownloadPreferences): Promise<MapDownloadPlan>;
   downloadMapSelection(request: MapDownloadRequest): Promise<MapDownloadResult>;
@@ -280,6 +318,7 @@ export interface PhotoMetadataApi {
   openExternal(url: string): Promise<void>;
   openMapSetup(): Promise<void>;
   onBackendLog(listener: (entry: BackendLogEntry) => void): void;
+  onMapLibraryChanged(listener: (result: MapLibraryScanResult) => void): void;
 }
 
 export const photoMetadataCapabilities = [
@@ -290,6 +329,7 @@ export const photoMetadataCapabilities = [
   'chooseDirectory',
   'chooseMapPack',
   'updateSettings',
+  'completeFirstRunSetup',
   'setSourceRoot',
   'addImportedFiles',
   'removeAssetsFromLibrary',
@@ -298,6 +338,7 @@ export const photoMetadataCapabilities = [
   'saveMetadata',
   'revertSidecars',
   'importMapPack',
+  'rescanMapLibrary',
   'getMapDownloadPlan',
   'saveMapDownloadPreferences',
   'downloadMapSelection',
@@ -308,7 +349,8 @@ export const photoMetadataCapabilities = [
   'revealPath',
   'openExternal',
   'openMapSetup',
-  'onBackendLog'
+  'onBackendLog',
+  'onMapLibraryChanged'
 ] as const;
 
 export const emptyMetadata = (): MetadataFields => ({

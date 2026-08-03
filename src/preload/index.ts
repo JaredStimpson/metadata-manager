@@ -3,6 +3,8 @@ import {
   AppSettings,
   AssetQuery,
   BackendLogEntry,
+  FirstRunSetup,
+  MapLibraryScanResult,
   MapDownloadPreferences,
   MapDownloadRequest,
   MetadataPatch,
@@ -17,6 +19,7 @@ const api: PhotoMetadataApi = {
   chooseDirectory: (title?: string) => ipcRenderer.invoke('dialog:chooseDirectory', title),
   chooseMapPack: () => ipcRenderer.invoke('dialog:chooseMapPack'),
   updateSettings: (settings: Partial<AppSettings>) => ipcRenderer.invoke('settings:update', settings),
+  completeFirstRunSetup: (setup: FirstRunSetup) => ipcRenderer.invoke('app:completeFirstRun', setup),
   setSourceRoot: (path: string) => ipcRenderer.invoke('library:setSourceRoot', path),
   addImportedFiles: (paths: string[]) => ipcRenderer.invoke('library:addImportedFiles', paths),
   removeAssetsFromLibrary: (assetIds: string[]) => ipcRenderer.invoke('library:removeAssets', assetIds),
@@ -25,6 +28,7 @@ const api: PhotoMetadataApi = {
   saveMetadata: (assetIds: string[], patch: MetadataPatch) => ipcRenderer.invoke('metadata:save', assetIds, patch),
   revertSidecars: (assetIds: string[]) => ipcRenderer.invoke('metadata:revert', assetIds),
   importMapPack: (path: string) => ipcRenderer.invoke('maps:import', path),
+  rescanMapLibrary: () => ipcRenderer.invoke('maps:rescan'),
   getMapDownloadPlan: () => ipcRenderer.invoke('maps:downloadPlan'),
   saveMapDownloadPreferences: (preferences: MapDownloadPreferences) =>
     ipcRenderer.invoke('maps:saveDownloadPreferences', preferences),
@@ -39,6 +43,10 @@ const api: PhotoMetadataApi = {
   onBackendLog: (listener: (entry: BackendLogEntry) => void) => {
     ipcRenderer.removeAllListeners('backend:log');
     ipcRenderer.on('backend:log', (_event, entry: BackendLogEntry) => listener(entry));
+  },
+  onMapLibraryChanged: (listener: (result: MapLibraryScanResult) => void) => {
+    ipcRenderer.removeAllListeners('maps:libraryChanged');
+    ipcRenderer.on('maps:libraryChanged', (_event, result: MapLibraryScanResult) => listener(result));
   }
 };
 

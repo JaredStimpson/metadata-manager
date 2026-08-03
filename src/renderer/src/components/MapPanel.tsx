@@ -3,6 +3,7 @@ import maplibregl from 'maplibre-gl';
 import { Protocol } from 'pmtiles';
 import { AlertTriangle, Crosshair, MapPin, Navigation, Search } from 'lucide-react';
 import { LocalPlace, MapPack, PhotoAsset } from '../../../shared/types';
+import { buildStyle } from '../mapStyle';
 
 let protocolRegistered = false;
 
@@ -11,6 +12,8 @@ interface MapPanelProps {
   mapPacks: MapPack[];
   tileServerUrl?: string;
   selectedAsset?: PhotoAsset;
+  expanded: boolean;
+  showLabels: boolean;
   onSearchPlaces(query: string): Promise<LocalPlace[]>;
   onApplyLocation(latitude: number, longitude: number): Promise<void>;
 }
@@ -20,6 +23,8 @@ export function MapPanel({
   mapPacks,
   tileServerUrl,
   selectedAsset,
+  expanded,
+  showLabels,
   onSearchPlaces,
   onApplyLocation
 }: MapPanelProps): JSX.Element {
@@ -34,7 +39,7 @@ export function MapPanel({
   const [mapError, setMapError] = useState<string>();
 
   const activeMapPack = useMemo(
-    () => mapPacks.find((pack) => pack.id === activeMapPackId && pack.kind === 'pmtiles'),
+    () => mapPacks.find((pack) => pack.id === activeMapPackId && pack.kind === 'pmtiles' && pack.availability === 'available'),
     [activeMapPackId, mapPacks]
   );
 
@@ -66,7 +71,7 @@ export function MapPanel({
         : [-98.5795, 39.8283];
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: buildStyle(`${tileServerUrl}/pmtiles/${encodeURIComponent(activeMapPack.id)}`),
+      style: buildStyle(`${tileServerUrl}/pmtiles/${encodeURIComponent(activeMapPack.id)}`, activeMapPack, showLabels),
       center: initialCenter as [number, number],
       zoom: pin ? 10 : activeMapPack.metadata?.center?.zoom ?? 3,
       attributionControl: false
@@ -82,6 +87,37 @@ export function MapPanel({
       markerRef.current = null;
     };
   }, [activeMapPack?.id, tileServerUrl]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const container = containerRef.current;
+    if (!map || !container) return;
+    const resize = (): void => {
+      map.resize();
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(container);
+    const first = window.requestAnimationFrame(resize);
+    const afterTransition = window.setTimeout(resize, 280);
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(first);
+      window.clearTimeout(afterTransition);
+    };
+  }, [expanded, activeMapPack?.id]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const applyVisibility = (): void => {
+      for (const layer of map.getStyle().layers ?? []) {
+        if (layer.type !== 'symbol' || !('layout' in layer) || !layer.layout?.['text-field']) continue;
+        map.setLayoutProperty(layer.id, 'visibility', showLabels ? 'visible' : 'none');
+      }
+    };
+    if (map.isStyleLoaded()) applyVisibility();
+    else map.once('styledata', applyVisibility);
+  }, [showLabels, activeMapPack?.id]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -202,63 +238,4 @@ function parseManualPin(latitude: string, longitude: string): { latitude: number
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return undefined;
   if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return undefined;
   return { latitude: lat, longitude: lon };
-}
-
-function buildStyle(pmtilesUrl: string): maplibregl.StyleSpecification {
-  return {
-    version: 8,
-    sources: {
-      offline: {
-        type: 'vector',
-        url: `pmtiles://${pmtilesUrl}`
-      }
-    },
-    layers: [
-      { id: 'background', type: 'background', paint: { 'background-color': '#ede9dd' } },
-      {
-        id: 'earth',
-        type: 'fill',
-        source: 'offline',
-        'source-layer': 'earth',
-        paint: { 'fill-color': '#e7dfca' }
-      },
-      {
-        id: 'landuse',
-        type: 'fill',
-        source: 'offline',
-        'source-layer': 'landuse',
-        paint: { 'fill-color': '#d6e3c5', 'fill-opacity': 0.55 }
-      },
-      {
-        id: 'water',
-        type: 'fill',
-        source: 'offline',
-        'source-layer': 'water',
-        paint: { 'fill-color': '#9cc9d4' }
-      },
-      {
-        id: 'roads-minor',
-        type: 'line',
-        source: 'offline',
-        'source-layer': 'roads',
-        paint: { 'line-color': '#ffffff', 'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.2, 12, 2.2] }
-      },
-      {
-        id: 'roads-major',
-        type: 'line',
-        source: 'offline',
-        'source-layer': 'roads',
-        filter: ['in', ['get', 'kind'], ['literal', ['highway', 'major_road']]],
-        paint: { 'line-color': '#d79f47', 'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.5, 12, 4] }
-      },
-      {
-        id: 'buildings',
-        type: 'fill',
-        source: 'offline',
-        'source-layer': 'buildings',
-        minzoom: 13,
-        paint: { 'fill-color': '#c9bdab', 'fill-opacity': 0.65 }
-      }
-    ]
-  };
 }

@@ -1,0 +1,33 @@
+appId: com.jaredstimpson.photometa
+productName: Photo Meta
+copyright: Copyright (c) 2026 Jared Stimpson
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+asar: true
+asarUnpack:
+  - node_modules/**/sql.js/dist/*.wasm
+  - node_modules/**/exiftool-vendored.exe/**/*
+extraResources:
+  - from: runtime-tools/pmtiles.exe
+    to: bin/pmtiles.exe
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Photo Meta
+  artifactName: Photo-Meta-Setup-${version}-x64.${ext}
+  uninstallDisplayName: Photo Meta
+portable:
+  artifactName: Photo-Meta-Portable-${version}-x64.${ext}

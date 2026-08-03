@@ -113,6 +113,18 @@ p {
   grid-template-columns: 88px minmax(540px, 1fr) 360px 390px;
 }
 
+.workflow-shell.editor-open.map-open.map-expanded {
+  grid-template-columns: 88px minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.workflow-shell.map-expanded .metadata-inspector {
+  display: none;
+}
+
+.workflow-shell.map-expanded .tools-drawer {
+  grid-column: 3;
+}
+
 .workflow-rail {
   grid-column: 1;
   grid-row: 1 / -1;
@@ -1214,6 +1226,85 @@ p {
   overflow: hidden;
 }
 
+.map-expanded .map-canvas {
+  height: min(64vh, 700px);
+  min-height: 420px;
+}
+
+.checkbox-row {
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-row input {
+  width: 16px;
+  min-height: 16px;
+}
+
+.checkbox-row small {
+  color: #7a5140;
+  text-align: right;
+}
+
+.installed-map.missing {
+  border-color: #c9a99a;
+  background: #f4ece7;
+  opacity: 0.78;
+}
+
+.first-run-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: #172422;
+}
+
+.first-run-panel {
+  width: min(760px, 100%);
+  display: grid;
+  gap: 24px;
+  padding: 28px;
+  border: 1px solid #d6ddd6;
+  border-radius: 8px;
+  background: #f4f5f1;
+  box-shadow: 0 18px 52px rgba(5, 15, 12, 0.28);
+}
+
+.first-run-panel > header {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  color: #172422;
+}
+
+.first-run-panel h1 {
+  font-size: 25px;
+}
+
+.first-run-panel p {
+  margin-top: 5px;
+  color: #59625d;
+}
+
+.first-run-folders {
+  display: grid;
+  gap: 14px;
+}
+
+.first-run-folders label > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.first-run-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .map-empty {
   min-height: 330px;
   border: 1px dashed #bfc7c0;
@@ -1855,6 +1946,16 @@ label,
 
   .workflow-shell.editor-open.map-open {
     grid-template-columns: 78px minmax(480px, 1fr) 330px;
+  }
+
+  .workflow-shell.editor-open.map-open.map-expanded {
+    grid-template-columns: 78px minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .workflow-shell.map-expanded .tools-drawer {
+    position: static;
+    width: auto;
+    box-shadow: none;
   }
 
   .library-toolbar {

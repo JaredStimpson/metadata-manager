@@ -16,6 +16,8 @@ describe('desktop bridge contract', () => {
         'saveMetadata',
         'revertSidecars',
         'importMapPack',
+        'rescanMapLibrary',
+        'completeFirstRunSetup',
         'getMapDownloadPlan',
         'saveMapDownloadPreferences',
         'downloadMapSelection',
@@ -23,7 +25,8 @@ describe('desktop bridge contract', () => {
         'searchPlaces',
         'exportImmich',
         'openMapSetup',
-        'onBackendLog'
+        'onBackendLog',
+        'onMapLibraryChanged'
       ])
     );
   });

@@ -9,10 +9,13 @@ import { BackendServer } from './services/backend-server';
 import { LibraryService } from './services/library-service';
 import { ThumbnailCache } from './services/thumbnail-cache';
 import { TileServer } from './services/tile-server';
+import { RuntimePaths } from './runtime-paths';
 import {
   AppSettings,
   AssetQuery,
+  FirstRunSetup,
   MapDownloadPreferences,
+  MapLibraryScanResult,
   MapDownloadRequest,
   MetadataPatch,
   photoMetadataCapabilities
@@ -28,6 +31,7 @@ let backendServer: BackendServer;
 let logger: BackendLogger;
 let thumbnailCache: ThumbnailCache;
 let exiftool: ExifToolService;
+let runtimePaths: RuntimePaths;
 
 async function bootstrap(): Promise<void> {
   await app.whenReady();
@@ -39,21 +43,30 @@ async function bootstrap(): Promise<void> {
     details: { appVersion: app.getVersion(), electron: process.versions.electron, node: process.versions.node }
   });
 
-  database = new DatabaseService(app.getPath('userData'));
+  runtimePaths = new RuntimePaths();
+  database = new DatabaseService(app.getPath('userData'), runtimePaths.sqlWasm);
   await database.init();
   if (!database.getSettings().sidecarRoot) {
     await database.updateSettings({
       sidecarRoot: path.join(app.getPath('documents'), 'Photo Metadata Manager', 'Sidecars')
     });
   }
+  if (database.getSettings().showMapLabels === undefined) {
+    await database.updateSettings({ showMapLabels: true });
+  }
 
   exiftool = new ExifToolService();
   thumbnailCache = new ThumbnailCache(app.getPath('userData'), exiftool, logger);
-  library = new LibraryService(database, exiftool, process.cwd(), {
+  library = new LibraryService(database, exiftool, runtimePaths.appRoot, {
     logger,
-    sessionCache: thumbnailCache
+    sessionCache: thumbnailCache,
+    sqlWasmPath: runtimePaths.sqlWasm,
+    pmtilesExecutable: runtimePaths.pmtilesExecutable,
+    defaultSidecarRoot: path.join(app.getPath('documents'), 'Photo Metadata Manager', 'Sidecars'),
+    defaultMapsDirectory: path.join(app.getPath('documents'), 'Photo Metadata Manager', 'Maps')
   });
   await library.clearPhotoSession();
+  if (database.getSettings().firstRunCompleted) await library.rescanMapLibrary();
 
   backendServer = new BackendServer(logger);
   backendServer.setThumbnailResolver(async (assetId) => {
@@ -71,6 +84,9 @@ async function bootstrap(): Promise<void> {
 
   registerIpc();
   createWindow();
+  if (database.getSettings().firstRunCompleted) {
+    await library.startMapLibraryWatcher(broadcastMapLibraryChange);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -127,8 +143,15 @@ function registerIpc(): void {
     settings: database.getSettings(),
     sourceRoots: database.listSourceRoots(),
     mapPacks: database.listMapPacks(),
-    tileServerUrl: await tileServer.start()
+    tileServerUrl: await tileServer.start(),
+    firstRunDefaults: library.getFirstRunDefaults()
   }));
+
+  handleIpc('app:completeFirstRun', async (_event, setup: FirstRunSetup) => {
+    const state = await library.completeFirstRunSetup(setup, await tileServer.start());
+    await library.startMapLibraryWatcher(broadcastMapLibraryChange);
+    return state;
+  });
 
   handleIpc('dialog:choosePhotoFolder', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
@@ -207,6 +230,7 @@ function registerIpc(): void {
   );
   handleIpc('metadata:revert', (_event, assetIds: string[]) => library.revertSidecars(assetIds));
   handleIpc('maps:import', (_event, filePath: string) => library.importMapPack(filePath));
+  handleIpc('maps:rescan', () => library.rescanMapLibrary());
   handleIpc('maps:downloadPlan', () => library.getMapDownloadPlan());
   handleIpc('maps:saveDownloadPreferences', (_event, preferences: MapDownloadPreferences) =>
     library.saveMapDownloadPreferences(preferences)
@@ -230,6 +254,11 @@ function registerIpc(): void {
   });
   handleIpc('tools:openMapSetup', async () => {
     const scriptPath = findProjectFile('MapSetup.cmd');
+    if (!fs.existsSync(scriptPath)) {
+      const result = await shell.openPath(library.getMapDownloadPlan().preferences.outputDirectory ?? library.getMapDownloadPlan().defaultOutputDirectory);
+      if (result) throw new Error(result);
+      return;
+    }
     const result = await shell.openPath(scriptPath);
     if (result) throw new Error(result);
   });
@@ -261,6 +290,10 @@ function handleIpc<TArgs extends unknown[], TResult>(
       throw error;
     }
   });
+}
+
+function broadcastMapLibraryChange(result: MapLibraryScanResult): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('maps:libraryChanged', result);
 }
 
 function registerCrashLogging(): void {
@@ -296,6 +329,7 @@ app.on('before-quit', () => {
   void logger?.flush();
   void backendServer?.stop();
   void tileServer?.stop();
+  library?.stopMapLibraryWatcher();
   void exiftool?.end();
 });
 
